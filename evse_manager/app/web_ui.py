@@ -154,44 +154,33 @@ HTML_TEMPLATE = """
             0%, 100% { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             50% { box-shadow: 0 4px 20px rgba(255,152,0,0.4); }
         }
-        .mode-switch {
+        .mode-toggle {
             display: inline-flex;
-            align-items: center;
-            gap: 12px;
-            background: #f1f1f1;
-            padding: 10px 16px;
+            border: 1px solid #ddd;
             border-radius: 999px;
-            box-shadow: inset 0 1px 4px rgba(0,0,0,0.1);
-        }
-        .mode-switch .switch-label { font-size: 13px; font-weight: 600; color: #555; }
-        .mode-switch .switch { position: relative; display: inline-block; }
-        .mode-switch input { display: none; }
-        .mode-switch .slider {
-            position: relative;
-            width: 56px;
-            height: 26px;
-            background: #ccc;
-            border-radius: 999px;
-            transition: background 0.2s;
-            cursor: pointer;
-        }
-        .mode-switch .slider::after {
-            content: "";
-            position: absolute;
-            top: 3px;
-            left: 3px;
-            width: 20px;
-            height: 20px;
+            overflow: hidden;
             background: white;
-            border-radius: 50%;
-            transition: transform 0.2s;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+            box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
         }
-        .mode-switch input:checked + .slider {
-            background: linear-gradient(135deg, #4caf50, #2e7d32);
+        .mode-toggle button {
+            border: none;
+            background: transparent;
+            padding: 8px 18px;
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            cursor: pointer;
+            color: #777;
+            transition: background 0.2s, color 0.2s;
         }
-        .mode-switch input:checked + .slider::after {
-            transform: translateX(30px);
+        .mode-toggle button.active {
+            background: #222;
+            color: white;
+        }
+        .mode-toggle button:not(.active):hover {
+            background: rgba(0,0,0,0.05);
+            color: #333;
         }
         .chip-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
         .chip {
@@ -388,13 +377,9 @@ HTML_TEMPLATE = """
         <div class="card">
             <h2>Controls</h2>
             <div class="controls">
-                <div class="mode-switch">
-                    <span class="switch-label">Manual</span>
-                    <label class="switch">
-                        <input type="checkbox" id="mode-toggle" onchange="handleModeToggle(this.checked)">
-                        <span class="slider"></span>
-                    </label>
-                    <span class="switch-label">Auto</span>
+                <div class="mode-toggle">
+                    <button id="mode-manual-btn" class="active" onclick="handleModeButton('manual')">Manual</button>
+                    <button id="mode-auto-btn" onclick="handleModeButton('auto')">Auto</button>
                 </div>
                 <div class="manual-only" id="manual-controls">
                     <select id="manual-current" onchange="setManualCurrent(this.value)">
@@ -449,9 +434,11 @@ HTML_TEMPLATE = """
             battery_priority: 'Battery Priority',
             inverter_limit: 'Inverter Limit',
             grace_period: 'Grace Period',
-            insufficient_power: 'Insufficient Solar'
+            insufficient_power: 'Insufficient Solar',
+            charger_refused: 'Charger Refused',
+            vehicle_charged: 'Vehicle Charged'
         };
-        let suppressModeToggleEvent = false;
+        let currentMode = null;
 
         function formatDuration(seconds) {
             if (!seconds) return '-';
@@ -511,17 +498,20 @@ HTML_TEMPLATE = """
             document.getElementById('mode').textContent = data.mode || '-';
             document.body.classList.toggle('mode-auto', data.mode === 'auto');
             document.body.classList.toggle('mode-manual', data.mode === 'manual');
+            if (data.mode) {
+                currentMode = data.mode;
+            }
             const modeChip = document.getElementById('mode-chip');
             if (modeChip) {
                 modeChip.textContent = data.mode === 'auto' ? 'Auto' : 'Manual';
                 modeChip.classList.toggle('auto', data.mode === 'auto');
                 modeChip.classList.toggle('manual', data.mode !== 'auto');
             }
-            const modeToggle = document.getElementById('mode-toggle');
-            if (modeToggle) {
-                suppressModeToggleEvent = true;
-                modeToggle.checked = data.mode === 'auto';
-                setTimeout(() => (suppressModeToggleEvent = false), 0);
+            const manualButton = document.getElementById('mode-manual-btn');
+            const autoButton = document.getElementById('mode-auto-btn');
+            if (manualButton && autoButton) {
+                manualButton.classList.toggle('active', data.mode !== 'auto');
+                autoButton.classList.toggle('active', data.mode === 'auto');
             }
             const manualSelect = document.getElementById('manual-current');
             if (manualSelect && data.manual_current) {
@@ -537,6 +527,10 @@ HTML_TEMPLATE = """
                     noteText = 'Auto paused: not enough solar to reach minimum charger current.';
                 } else if (data.auto_pause_reason === 'battery_priority') {
                     noteText = 'Battery priority is holding charging until SOC recovers.';
+                } else if (data.auto_pause_reason === 'charger_refused') {
+                    noteText = 'Charger declined the start command twice; waiting so you can check the vehicle.';
+                } else if (data.auto_pause_reason === 'vehicle_charged') {
+                    noteText = 'Vehicle still reports fully charged, so the charger is staying idle.';
                 } else if (data.charger_transition === 'stopping') {
                     noteText = 'Stopping charger… waiting for hardware to acknowledge.';
                 } else if (data.charger_transition === 'starting') {
@@ -669,6 +663,9 @@ HTML_TEMPLATE = """
         }
         
         async function setMode(mode) {
+            if (currentMode && currentMode === mode) {
+                return;
+            }
             setControlsDisabled(true);
             try {
                 const response = await apiFetch('/api/mode', {
@@ -686,9 +683,10 @@ HTML_TEMPLATE = """
             }
         }
 
-        function handleModeToggle(checked) {
-            if (suppressModeToggleEvent) return;
-            const mode = checked ? 'auto' : 'manual';
+        function handleModeButton(mode) {
+            if (currentMode && currentMode === mode) {
+                return;
+            }
             setMode(mode);
         }
         

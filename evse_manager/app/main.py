@@ -60,11 +60,16 @@ class EVSEManager:
         self.adaptive_tuner = AdaptiveTuner(adaptive_config) if adaptive_config.get('enabled') else None
         
         # Control parameters
-        self.mode = self.config['control'].get('mode', 'auto')
-        self.manual_current = self.config['control'].get('manual_current', 6)
-        self.update_interval = self.config['control'].get('update_interval', 5)
-        self.grace_period = self.config['control'].get('grace_period', 600)
-        self.min_session_duration = self.config['control'].get('min_session_duration', 600)
+        control_settings = self.config.get('control', {})
+        self.mode = control_settings.get('mode', 'auto')
+        self.manual_current = control_settings.get('manual_current', 6)
+        self.update_interval = control_settings.get('update_interval', 5)
+        self.grace_period = control_settings.get('grace_period', 600)
+        self.min_session_duration = control_settings.get('min_session_duration', 600)
+        self.start_retry_attempts = control_settings.get('start_retry_attempts', 2)
+        self.start_retry_delay = control_settings.get('start_retry_delay', 3)
+        self.start_retry_cooldown = control_settings.get('start_retry_cooldown', 300)
+        self.start_handshake_window = control_settings.get('start_handshake_window', 20)
         
         # Apply learned settings if available
         if self.adaptive_tuner and self.adaptive_tuner.should_apply_settings():
@@ -76,6 +81,9 @@ class EVSEManager:
         self.insufficient_power_since = None
         self.session_active = False
         self.last_adjustment_time = None
+        self.failed_start_reason = None
+        self.last_failed_start_time = None
+        self.startup_handshake_deadline = None
         
         self.logger.info("="*60)
         self.logger.info("EVSE Manager initialized successfully")
@@ -134,7 +142,11 @@ class EVSEManager:
                     'grace_period': config.get('grace_period', 600),
                     'min_session_duration': 600,
                     'power_smoothing_window': 60,
-                    'hysteresis_watts': config.get('hysteresis_watts', 500)
+                    'hysteresis_watts': config.get('hysteresis_watts', 500),
+                    'start_retry_attempts': config.get('start_retry_attempts', 2),
+                    'start_retry_delay': config.get('start_retry_delay', 3),
+                    'start_retry_cooldown': config.get('start_retry_cooldown', 300),
+                    'start_handshake_window': config.get('start_handshake_window', 20)
                 },
                 'adaptive': {
                     'enabled': False
@@ -186,13 +198,28 @@ class EVSEManager:
         
         return False
     
-    def should_start_charging(self) -> bool:
+    def should_start_charging(self, ignore_cooldown: bool = False) -> bool:
         """
         Determine if we should start a charging session.
+        
+        Args:
+            ignore_cooldown: Whether to ignore recent failed-start cooldowns (used for manual overrides)
         
         Returns:
             True if conditions are met to start charging
         """
+        # Respect cooldown after a failed start to avoid flapping
+        if (not ignore_cooldown and self.last_failed_start_time and self.start_retry_cooldown):
+            elapsed = (datetime.now() - self.last_failed_start_time).total_seconds()
+            if elapsed < self.start_retry_cooldown:
+                remaining = int(self.start_retry_cooldown - elapsed)
+                self.logger.info(
+                    f"Skipping start attempt: cooldown {remaining}s remaining after {self.failed_start_reason}"
+                )
+                return False
+            self.failed_start_reason = None
+            self.last_failed_start_time = None
+
         # Check charger status
         status = self.charger.get_status()
         
@@ -302,6 +329,31 @@ class EVSEManager:
             if self.charger.can_adjust_now():
                 self.logger.info(f"Manual mode: adjusting to {self.manual_current}A")
                 self.charger.set_current_step(self.manual_current)
+
+    def _record_failed_start(self, reason: str):
+        """Record a failed start attempt so we can back off auto retries."""
+        self.failed_start_reason = reason
+        self.last_failed_start_time = datetime.now()
+
+    def _ensure_charger_powered(self) -> bool:
+        """Make sure the charger switch stays on, retrying safely if needed."""
+        if self.charger.is_on():
+            return True
+        max_attempts = max(1, self.start_retry_attempts)
+        for attempt in range(1, max_attempts + 1):
+            self.logger.info(f"Charger power-on attempt {attempt}/{max_attempts}")
+            self.charger.turn_on()
+            time.sleep(self.start_retry_delay)
+            if self.charger.is_on():
+                return True
+            self.logger.warning("Charger switched itself off after ON command")
+        return False
+
+    def _session_duration_seconds(self) -> float:
+        """Return current session duration in seconds if available."""
+        if self.session_manager and self.session_manager.session_start_time:
+            return (datetime.now() - self.session_manager.session_start_time).total_seconds()
+        return 0.0
     
     def _apply_learned_settings(self):
         """Apply learned optimal settings."""
@@ -329,12 +381,14 @@ class EVSEManager:
             'grace_period': self.grace_period
         }
     
-    def start_charging(self):
+    def start_charging(self, manual_request: bool = False) -> bool:
         """Start a charging session."""
         if self.session_active:
-            return
+            return True
         
-        self.logger.info("Starting charging session")
+        qualifier = " (manual request)" if manual_request else ""
+        self.logger.info(f"Starting charging session{qualifier}")
+        self.failed_start_reason = None
         
         # If learning mode active, get next settings to try
         if self.adaptive_tuner and not self.adaptive_tuner.learning_complete:
@@ -354,15 +408,22 @@ class EVSEManager:
                 # Start trial tracking
                 self.adaptive_tuner.start_trial(next_settings)
         
-        # Turn on charger if needed
-        if not self.charger.is_on():
-            self.charger.turn_on()
-            time.sleep(2)  # Give charger time to turn on
+        # Turn on charger if needed with safe retries
+        if not self._ensure_charger_powered():
+            self.logger.error("Charger refused to stay on - aborting start")
+            self._record_failed_start('charger_refused')
+            return False
         
         # Start session tracking
         self.session_manager.start_session(mode=self.mode)
         self.session_active = True
         self.insufficient_power_since = None
+        self.last_failed_start_time = None
+        self.startup_handshake_deadline = (
+            datetime.now() + timedelta(seconds=self.start_handshake_window)
+            if self.start_handshake_window
+            else None
+        )
         
         # Set initial current
         if self.mode == 'manual':
@@ -374,6 +435,7 @@ class EVSEManager:
         self.charger.set_current_step(target, force=True)
         # Update power manager with commanded current
         self.power_manager.set_commanded_current(target)
+        return True
     
     def stop_charging(self, reason: str = "normal"):
         """Stop charging session."""
@@ -384,6 +446,7 @@ class EVSEManager:
         
         # Turn off charger
         self.charger.turn_off()
+        self.startup_handshake_deadline = None
         
         # Get session data before ending
         session_info = self.session_manager.get_current_session_info()
@@ -452,8 +515,6 @@ class EVSEManager:
                 'reason': 'insufficient_power'
             }
 
-        # Battery telemetry for UI insight
-        battery_info = None
         sensors = self.config.get('sensors', {})
         soc_entity = sensors.get('battery_soc_entity')
         power_entity = sensors.get('battery_power_entity')
@@ -493,6 +554,10 @@ class EVSEManager:
             limiting_factors.append('grace_period')
         if insufficient_power:
             limiting_factors.append('insufficient_power')
+        if self.failed_start_reason == 'charger_refused':
+            limiting_factors.append('charger_refused')
+        elif self.failed_start_reason == 'vehicle_charged':
+            limiting_factors.append('vehicle_charged')
 
         auto_pause_reason = None
         if self.mode == 'auto' and not self.session_active:
@@ -500,6 +565,8 @@ class EVSEManager:
                 auto_pause_reason = 'battery_priority'
             elif insufficient_power:
                 auto_pause_reason = 'insufficient_power'
+        if not self.session_active and auto_pause_reason is None and self.failed_start_reason:
+            auto_pause_reason = self.failed_start_reason
 
         charger_transition = None
         if self.session_active and not charger_on:
@@ -577,8 +644,11 @@ class EVSEManager:
                 
                 elif cmd_type == 'start':
                     self.logger.info("UI command: Start charging")
-                    if self.should_start_charging():
-                        self.start_charging()
+                    if self.should_start_charging(ignore_cooldown=True):
+                        if not self.start_charging(manual_request=True):
+                            self.logger.warning("Manual start command failed - check vehicle state")
+                    else:
+                        self.logger.info("Start command ignored: conditions not met")
                 
                 elif cmd_type == 'stop':
                     self.logger.info("UI command: Stop charging")
@@ -603,7 +673,8 @@ class EVSEManager:
             # Check if we should start or stop
             if not self.session_active:
                 if self.should_start_charging():
-                    self.start_charging()
+                    if not self.start_charging():
+                        self.logger.debug("Start attempt aborted - waiting before retry")
                 else:
                     if self.mode == 'auto' and self.charger.is_on():
                         available_power = self.power_manager.get_available_power()
@@ -614,21 +685,51 @@ class EVSEManager:
             else:
                 # Session active - check if we should stop
                 self.logger.debug(f"Session active, status={status.value}, mode={self.mode}")
+                if not self.charger.is_on():
+                    self.logger.warning("Charger switch is OFF while session marked active - stopping")
+                    self._record_failed_start('charger_refused')
+                    self.stop_charging("charger_switch_off")
+                    return
+
+                if status == ChargerStatus.CHARGING and self.startup_handshake_deadline:
+                    self.startup_handshake_deadline = None
+
+                session_duration = self._session_duration_seconds()
+                handshake_active = (
+                    self.startup_handshake_deadline is not None
+                    and datetime.now() < self.startup_handshake_deadline
+                )
+
                 if status in [ChargerStatus.AVAILABLE, ChargerStatus.CHARGED]:
-                    self.stop_charging("car_disconnected")
-                elif status == ChargerStatus.FAULT:
-                    self.stop_charging("fault")
-                elif self.check_battery_priority():
-                    self.stop_charging("battery_priority")
-                else:
-                    # Continue charging - handle mode-specific logic
-                    if self.mode == 'auto':
-                        self.handle_auto_mode()
+                    if handshake_active:
+                        self.logger.debug(
+                            f"Vehicle still reporting {status.value} during handshake window; waiting"
+                        )
                     else:
-                        self.handle_manual_mode()
-                    
-                    # Update session data
-                    self.update_session_data()
+                        reason = "car_full" if status == ChargerStatus.CHARGED else "car_disconnected"
+                        handshake_buffer = (self.start_handshake_window or 0) * 2
+                        min_duration_before_full = max(120, handshake_buffer)
+                        if status == ChargerStatus.CHARGED and session_duration < min_duration_before_full:
+                            self._record_failed_start('vehicle_charged')
+                        self.stop_charging(reason)
+                    return
+
+                if status == ChargerStatus.FAULT:
+                    self.stop_charging("fault")
+                    return
+
+                if self.check_battery_priority():
+                    self.stop_charging("battery_priority")
+                    return
+
+                # Continue charging - handle mode-specific logic
+                if self.mode == 'auto':
+                    self.handle_auto_mode()
+                else:
+                    self.handle_manual_mode()
+                
+                # Update session data
+                self.update_session_data()
             
             # Publish status periodically (every 10 seconds)
             if self.entity_publisher and (self.last_status_publish is None or \
