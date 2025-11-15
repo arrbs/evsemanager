@@ -29,6 +29,7 @@ class EVSEManager:
         """Initialize the EVSE Manager."""
         self.config = config if config is not None else self._load_config()
         self._setup_logging()
+        self.config = self._normalize_config(self.config)  # Convert simple format to internal format
         
         # Initialize components
         if ha_api is not None:
@@ -94,6 +95,57 @@ class EVSEManager:
         except FileNotFoundError:
             logging.error("Configuration file not found")
             sys.exit(1)
+    
+    def _normalize_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert simplified config format to internal format for backwards compatibility."""
+        # Check if already in new format (has top-level simple keys)
+        if 'charger_switch' in config:
+            # New simplified format - convert to internal structure
+            allowed_currents_str = config.get('charger_allowed_currents', '6,8,10,13,16,20,24')
+            allowed_currents = [int(x.strip()) for x in allowed_currents_str.split(',')]
+            
+            normalized = {
+                'charger': {
+                    'name': 'EVSE',
+                    'switch_entity': config.get('charger_switch'),
+                    'current_entity': config.get('charger_current'),
+                    'status_entity': config.get('charger_status'),
+                    'allowed_currents': allowed_currents,
+                    'max_current': max(allowed_currents),
+                    'step_delay': config.get('charger_step_delay', 10),
+                    'voltage_entity': config.get('voltage_sensor'),
+                    'default_voltage': 230
+                },
+                'power_method': 'battery',
+                'sensors': {
+                    'battery_soc_entity': config.get('battery_soc'),
+                    'battery_power_entity': config.get('battery_power'),
+                    'battery_high_soc': 95,
+                    'battery_priority_soc': 80,
+                    'battery_target_discharge_min': 0,
+                    'battery_target_discharge_max': 1500,
+                    'inverter_power_entity': config.get('inverter_power'),
+                    'inverter_max_power': 8000
+                },
+                'control': {
+                    'mode': config.get('mode', 'manual'),
+                    'manual_current': 6,
+                    'update_interval': config.get('update_interval', 5),
+                    'grace_period': config.get('grace_period', 600),
+                    'min_session_duration': 600,
+                    'power_smoothing_window': 60,
+                    'hysteresis_watts': config.get('hysteresis_watts', 500)
+                },
+                'adaptive': {
+                    'enabled': False
+                },
+                'log_level': config.get('log_level', 'info')
+            }
+            self.logger.info("Converted simplified config to internal format")
+            return normalized
+        else:
+            # Already in old detailed format
+            return config
     
     def _setup_logging(self):
         """Set up logging based on configuration."""

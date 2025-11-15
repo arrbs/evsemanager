@@ -2,7 +2,7 @@ name: EVSE Manager
 version: "0.1.0"
 slug: evse_manager
 description: Intelligent EVSE power management with solar optimization
-url: "https://github.com/yourusername/homeassistant-evse-manager"
+url: "https://github.com/arrbs/evsemanager"
 arch:
   - armhf
   - armv7
@@ -21,122 +21,41 @@ hassio_role: default
 auth_api: true
 
 options:
-  # Charger Configuration
-  charger:
-    name: "Custom EVSE"
-    switch_entity: "switch.ev_charger"
-    current_entity: "number.ev_charger_set_current"
-    status_entity: "sensor.ev_charger_status"
-    allowed_currents: [6, 8, 10, 13, 16, 20, 24]
-    max_current: 24
-    step_delay: 10
-    voltage_entity: "sensor.ss_inverter_voltage"
-    default_voltage: 230
+  # Charger settings
+  charger_switch: "switch.ev_charger"
+  charger_current: "number.ev_charger_set_current"
+  charger_status: "sensor.ev_charger_status"
+  charger_allowed_currents: "6,8,10,13,16,20,24"
+  charger_step_delay: 10
   
-  # Power Calculation Method
-  power_method: "battery"  # Options: "direct", "grid", "battery"
+  # Battery sensors (for solar calculation)
+  battery_soc: "sensor.ss_battery_soc"
+  battery_power: "sensor.ss_battery_power"
   
-  # Sensor Configuration (based on method)
-  sensors:
-    # Method A: Direct excess power sensor
-    excess_power_entity: "sensor.pv_excess_power"
-    
-    # Method B: Grid export method
-    grid_power_entity: "sensor.ss_grid_ct_power"
-    
-    # Method C: Battery method
-    battery_soc_entity: "sensor.ss_battery_soc"
-    battery_power_entity: "sensor.ss_battery_power"
-    battery_high_soc: 95
-    battery_priority_soc: 80
-    battery_target_discharge_min: 0
-    battery_target_discharge_max: 1500
-    
-    # Additional sensors
-    inverter_power_entity: "sensor.ss_inverter_power"
-    inverter_max_power: 8000
-    total_pv_entity: "sensor.total_pv_power"
-    total_load_entity: "sensor.total_load_power"
+  # Optional sensors
+  voltage_sensor: "sensor.ss_inverter_voltage"
+  inverter_power: "sensor.ss_inverter_power"
   
-  # Control Parameters
-  control:
-    mode: "auto"                  # "auto" or "manual"
-    manual_current: 6             # Current for manual mode (Amps)
-    update_interval: 5            # Control loop interval (seconds)
-    grace_period: 600             # Seconds to wait before stopping due to low power
-    min_session_duration: 600     # Minimum session time (seconds)
-    power_smoothing_window: 60    # Smoothing window for power readings (seconds)
-    hysteresis_watts: 500         # Minimum power change to trigger adjustment
-    
-    # Sensor delay compensation
-  # The grace_period setting handles sensor delay naturally - no predictive model needed
-  sensor_delay_seconds: 60
-  predictive_model_enabled: false
-  predictive_safety_margin: 0.15
+  # Control settings
+  mode: "manual"
+  update_interval: 5
+  grace_period: 600
+  hysteresis_watts: 500
   
-  # Adaptive Learning
-  adaptive:
-    enabled: false                # Enable learning mode
-    learning_sessions: 20         # Number of sessions to learn over
-    optimization_goal: "balanced" # "solar", "stability", "balanced"
-    auto_apply: false            # Automatically apply learned settings
-    tune_hysteresis: true        # Allow tuning hysteresis
-    tune_smoothing: true         # Allow tuning smoothing window
-    tune_grace_period: true      # Allow tuning grace period
-    min_step_delay: 5            # Minimum safe step delay (safety limit)
-    max_step_delay: 30           # Maximum step delay to try
-  
-  # Logging
   log_level: "info"
 
 schema:
-  charger:
-    name: str
-    switch_entity: str
-    current_entity: str
-    status_entity: str
-    allowed_currents: [int]
-    step_delay: int(1,60)
-    voltage_entity: str?
-    default_voltage: int(200,250)
-  
-  power_method: list(direct|grid|battery)
-  
-  sensors:
-    excess_power_entity: str?
-    grid_power_entity: str?
-    battery_soc_entity: str?
-    battery_power_entity: str?
-    battery_high_soc: int(50,100)?
-    battery_priority_soc: int(50,100)?
-    battery_target_discharge_min: int(0,5000)?
-    battery_target_discharge_max: int(0,5000)?
-    inverter_power_entity: str?
-    inverter_max_power: int(1000,50000)?
-    total_pv_entity: str?
-    total_load_entity: str?
-  
-  control:
-    mode: list(auto|manual)
-    manual_current: int(1,32)
-    update_interval: int(1,60)
-    grace_period: int(60,3600)
-    min_session_duration: int(60,3600)
-    power_smoothing_window: int(10,300)
-    hysteresis_watts: int(100,5000)
-    sensor_delay_seconds: int(0,300)?
-    predictive_model_enabled: bool?
-    predictive_safety_margin: float?
-  
-  adaptive:
-    enabled: bool
-    learning_sessions: int(5,100)
-    optimization_goal: list(solar|stability|balanced)
-    auto_apply: bool
-    tune_hysteresis: bool
-    tune_smoothing: bool
-    tune_grace_period: bool
-    min_step_delay: int(1,30)
-    max_step_delay: int(5,60)
-  
+  charger_switch: str
+  charger_current: str
+  charger_status: str
+  charger_allowed_currents: str
+  charger_step_delay: int(5,60)
+  battery_soc: str
+  battery_power: str
+  voltage_sensor: str?
+  inverter_power: str?
+  mode: list(auto|manual)
+  update_interval: int(1,60)
+  grace_period: int(60,3600)
+  hysteresis_watts: int(100,5000)
   log_level: list(debug|info|warning|error)
