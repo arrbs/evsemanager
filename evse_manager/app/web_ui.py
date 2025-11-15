@@ -376,9 +376,13 @@ HTML_TEMPLATE = """
             setTimeout(() => errorDiv.style.display = 'none', 5000);
         }
         
+        const ingressMatch = window.location.pathname.match(/^\/api\/hassio_ingress\/[A-Za-z0-9_-]+/);
+        const basePath = ingressMatch ? ingressMatch[0] : '';
+        const apiFetch = (path, options) => fetch(`${basePath}${path}`, options);
+        
         async function fetchStatus() {
             try {
-                const response = await fetch('/api/status');
+                const response = await apiFetch('/api/status');
                 if (!response.ok) throw new Error('Failed to fetch status');
                 const data = await response.json();
                 updateUI(data);
@@ -390,7 +394,7 @@ HTML_TEMPLATE = """
         
         async function setMode(mode) {
             try {
-                const response = await fetch('/api/mode', {
+                const response = await apiFetch('/api/mode', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ mode })
@@ -404,7 +408,7 @@ HTML_TEMPLATE = """
         
         async function setManualCurrent(current) {
             try {
-                const response = await fetch('/api/manual_current', {
+                const response = await apiFetch('/api/manual_current', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ current: parseInt(current) })
@@ -418,7 +422,7 @@ HTML_TEMPLATE = """
         
         async function startCharging() {
             try {
-                const response = await fetch('/api/start', { method: 'POST' });
+                const response = await apiFetch('/api/start', { method: 'POST' });
                 if (!response.ok) throw new Error('Failed to start charging');
                 fetchStatus();
             } catch (error) {
@@ -428,7 +432,7 @@ HTML_TEMPLATE = """
         
         async function stopCharging() {
             try {
-                const response = await fetch('/api/stop', { method: 'POST' });
+                const response = await apiFetch('/api/stop', { method: 'POST' });
                 if (!response.ok) throw new Error('Failed to stop charging');
                 fetchStatus();
             } catch (error) {
