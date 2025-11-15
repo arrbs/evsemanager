@@ -35,8 +35,21 @@ HTML_TEMPLATE = """
             border-radius: 8px;
             margin-bottom: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
         }
-        h1 { color: #333; margin-bottom: 10px; }
+        body.mode-auto .header {
+            box-shadow: 0 4px 25px rgba(76, 175, 80, 0.35);
+            border: 2px solid rgba(76, 175, 80, 0.4);
+        }
+        h1 { color: #333; margin-bottom: 6px; }
+        .header-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
         .status-badge {
             display: inline-block;
             padding: 5px 12px;
@@ -47,6 +60,17 @@ HTML_TEMPLATE = """
         .status-active { background: #4caf50; color: white; }
         .status-idle { background: #999; color: white; }
         .status-fault { background: #f44336; color: white; }
+        .mode-chip {
+            padding: 6px 16px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+        }
+        .mode-chip.auto { background: linear-gradient(135deg, #4caf50, #2e7d32); color: white; }
+        .mode-chip.manual { background: #e0e0e0; color: #424242; }
         
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
         .card {
@@ -77,6 +101,7 @@ HTML_TEMPLATE = """
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
+            align-items: center;
         }
         button {
             padding: 10px 20px;
@@ -129,6 +154,45 @@ HTML_TEMPLATE = """
             0%, 100% { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             50% { box-shadow: 0 4px 20px rgba(255,152,0,0.4); }
         }
+        .mode-switch {
+            display: inline-flex;
+            align-items: center;
+            gap: 12px;
+            background: #f1f1f1;
+            padding: 10px 16px;
+            border-radius: 999px;
+            box-shadow: inset 0 1px 4px rgba(0,0,0,0.1);
+        }
+        .mode-switch .switch-label { font-size: 13px; font-weight: 600; color: #555; }
+        .mode-switch .switch { position: relative; display: inline-block; }
+        .mode-switch input { display: none; }
+        .mode-switch .slider {
+            position: relative;
+            width: 56px;
+            height: 26px;
+            background: #ccc;
+            border-radius: 999px;
+            transition: background 0.2s;
+            cursor: pointer;
+        }
+        .mode-switch .slider::after {
+            content: "";
+            position: absolute;
+            top: 3px;
+            left: 3px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+        .mode-switch input:checked + .slider {
+            background: linear-gradient(135deg, #4caf50, #2e7d32);
+        }
+        .mode-switch input:checked + .slider::after {
+            transform: translateX(30px);
+        }
         .chip-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
         .chip {
             padding: 6px 12px;
@@ -140,13 +204,30 @@ HTML_TEMPLATE = """
         }
         .chip-warning { background: #fff3cd; color: #856404; }
         .chip-danger { background: #fdecea; color: #c62828; }
+        .status-note {
+            margin-top: 10px;
+            padding: 10px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            background: #fffbe6;
+            color: #8f6d00;
+            display: none;
+        }
+        .manual-only { display: none; gap: 10px; align-items: center; }
+        body.mode-manual .manual-only { display: inline-flex; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>⚡ EVSE Manager</h1>
-            <span class="status-badge" id="status-badge">Loading...</span>
+            <div>
+                <h1>⚡ EVSE Manager</h1>
+                <div style="color:#777; font-size:13px;">Smart solar charging controller</div>
+            </div>
+            <div class="header-meta">
+                <span class="mode-chip manual" id="mode-chip">MODE</span>
+                <span class="status-badge" id="status-badge">Loading...</span>
+            </div>
         </div>
         
         <div id="error-message" class="error" style="display: none;"></div>
@@ -221,6 +302,7 @@ HTML_TEMPLATE = """
                         <span class="metric-unit">W</span>
                     </span>
                 </div>
+                <div class="status-note" id="status-note"></div>
             </div>
             
             <div class="card">
@@ -306,18 +388,26 @@ HTML_TEMPLATE = """
         <div class="card">
             <h2>Controls</h2>
             <div class="controls">
-                <button class="btn-primary" onclick="setMode('auto')">Auto Mode</button>
-                <button class="btn-secondary" onclick="setMode('manual')">Manual Mode</button>
-                <select id="manual-current" onchange="setManualCurrent(this.value)">
-                    <option value="6">6A</option>
-                    <option value="8">8A</option>
-                    <option value="10">10A</option>
-                    <option value="13">13A</option>
-                    <option value="16">16A</option>
-                    <option value="20">20A</option>
-                    <option value="24">24A</option>
-                </select>
-                <button class="btn-success" onclick="startCharging()">Start Charging</button>
+                <div class="mode-switch">
+                    <span class="switch-label">Manual</span>
+                    <label class="switch">
+                        <input type="checkbox" id="mode-toggle" onchange="handleModeToggle(this.checked)">
+                        <span class="slider"></span>
+                    </label>
+                    <span class="switch-label">Auto</span>
+                </div>
+                <div class="manual-only" id="manual-controls">
+                    <select id="manual-current" onchange="setManualCurrent(this.value)">
+                        <option value="6">6A</option>
+                        <option value="8">8A</option>
+                        <option value="10">10A</option>
+                        <option value="13">13A</option>
+                        <option value="16">16A</option>
+                        <option value="20">20A</option>
+                        <option value="24">24A</option>
+                    </select>
+                    <button class="btn-success" onclick="startCharging()">Start Charging</button>
+                </div>
                 <button class="btn-danger" onclick="stopCharging()">Stop Charging</button>
             </div>
         </div>
@@ -358,8 +448,10 @@ HTML_TEMPLATE = """
         const LIMITING_LABELS = {
             battery_priority: 'Battery Priority',
             inverter_limit: 'Inverter Limit',
-            grace_period: 'Grace Period'
+            grace_period: 'Grace Period',
+            insufficient_power: 'Insufficient Solar'
         };
+        let suppressModeToggleEvent = false;
 
         function formatDuration(seconds) {
             if (!seconds) return '-';
@@ -417,9 +509,42 @@ HTML_TEMPLATE = """
             
             // Current status
             document.getElementById('mode').textContent = data.mode || '-';
+            document.body.classList.toggle('mode-auto', data.mode === 'auto');
+            document.body.classList.toggle('mode-manual', data.mode === 'manual');
+            const modeChip = document.getElementById('mode-chip');
+            if (modeChip) {
+                modeChip.textContent = data.mode === 'auto' ? 'Auto' : 'Manual';
+                modeChip.classList.toggle('auto', data.mode === 'auto');
+                modeChip.classList.toggle('manual', data.mode !== 'auto');
+            }
+            const modeToggle = document.getElementById('mode-toggle');
+            if (modeToggle) {
+                suppressModeToggleEvent = true;
+                modeToggle.checked = data.mode === 'auto';
+                setTimeout(() => (suppressModeToggleEvent = false), 0);
+            }
+            const manualSelect = document.getElementById('manual-current');
+            if (manualSelect && data.manual_current) {
+                manualSelect.value = String(data.manual_current);
+            }
             document.getElementById('charger-status').textContent = data.charger_status || '-';
             document.getElementById('current-amps').textContent = data.current_amps?.toFixed(1) || '-';
             document.getElementById('charging-power').textContent = data.charging_power?.toFixed(0) || '-';
+            const statusNote = document.getElementById('status-note');
+            if (statusNote) {
+                let noteText = '';
+                if (data.auto_pause_reason === 'insufficient_power') {
+                    noteText = 'Auto paused: not enough solar to reach minimum charger current.';
+                } else if (data.auto_pause_reason === 'battery_priority') {
+                    noteText = 'Battery priority is holding charging until SOC recovers.';
+                } else if (data.charger_transition === 'stopping') {
+                    noteText = 'Stopping charger… waiting for hardware to acknowledge.';
+                } else if (data.charger_transition === 'starting') {
+                    noteText = 'Starting charger… waiting for hardware to ramp up.';
+                }
+                statusNote.textContent = noteText;
+                statusNote.style.display = noteText ? 'block' : 'none';
+            }
             
             // Solar power
             document.getElementById('available-power').textContent = data.available_power?.toFixed(0) || '-';
@@ -451,7 +576,7 @@ HTML_TEMPLATE = """
                     return `<span class="${chipClass}">${label}</span>`;
                 }).join('');
             }
-            const highlightLimits = limitingFactors.includes('battery_priority') || limitingFactors.includes('grace_period');
+            const highlightLimits = limitingFactors.includes('battery_priority') || limitingFactors.includes('grace_period') || limitingFactors.includes('insufficient_power');
             batteryCard.classList.toggle('card-warning', highlightLimits);
             
             // Grace period intention
@@ -559,6 +684,12 @@ HTML_TEMPLATE = """
             } finally {
                 setControlsDisabled(false);
             }
+        }
+
+        function handleModeToggle(checked) {
+            if (suppressModeToggleEvent) return;
+            const mode = checked ? 'auto' : 'manual';
+            setMode(mode);
         }
         
         async function setManualCurrent(current) {

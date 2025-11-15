@@ -420,6 +420,12 @@ class EVSEManager:
         target_current = self.power_manager.commanded_current or current_amps
         charging_power = self.charger.get_power() if self.session_active else 0
         available_power = self.power_manager.get_available_power()
+        min_power = self.charger.get_min_power()
+        charger_on = self.charger.is_on()
+        insufficient_power = False
+        if self.mode == 'auto':
+            if available_power is None or available_power < min_power:
+                insufficient_power = True
 
         # Capture inverter telemetry for UI visibility
         inverter_power = None
@@ -485,6 +491,21 @@ class EVSEManager:
             limiting_factors.append('inverter_limit')
         if grace_status and grace_status.get('active'):
             limiting_factors.append('grace_period')
+        if insufficient_power:
+            limiting_factors.append('insufficient_power')
+
+        auto_pause_reason = None
+        if self.mode == 'auto' and not self.session_active:
+            if battery_priority_active:
+                auto_pause_reason = 'battery_priority'
+            elif insufficient_power:
+                auto_pause_reason = 'insufficient_power'
+
+        charger_transition = None
+        if self.session_active and not charger_on:
+            charger_transition = 'starting'
+        elif not self.session_active and charger_on:
+            charger_transition = 'stopping'
 
         # Prepare state dict
         state = {
@@ -495,10 +516,13 @@ class EVSEManager:
             'target_current': target_current,
             'available_power': available_power,
             'charging_power': charging_power,
+            'manual_current': self.manual_current,
             'inverter_power': inverter_power,
             'inverter_limiting': inverter_limiting,
             'battery': battery_info,
             'limiting_factors': limiting_factors,
+            'auto_pause_reason': auto_pause_reason,
+            'charger_transition': charger_transition,
             'grace_period': grace_status,
             'session_info': self.session_manager.get_current_session_info(),
             'stats': self.session_manager.get_stats(),
@@ -536,6 +560,14 @@ class EVSEManager:
                     if new_mode in ['auto', 'manual']:
                         self.logger.info(f"UI command: Set mode to {new_mode}")
                         self.mode = new_mode
+                        if new_mode == 'manual':
+                            min_current = min(self.charger.allowed_currents)
+                            if self.manual_current != min_current:
+                                self.logger.info(f"Manual mode defaulting current to {min_current}A")
+                                self.manual_current = min_current
+                            if self.charger.is_on():
+                                self.logger.info("Manual mode engaged while charger on - forcing current to minimum")
+                                self.charger.set_current_step(min_current, force=True)
                 
                 elif cmd_type == 'set_manual_current':
                     current = command.get('current')
@@ -572,6 +604,13 @@ class EVSEManager:
             if not self.session_active:
                 if self.should_start_charging():
                     self.start_charging()
+                else:
+                    if self.mode == 'auto' and self.charger.is_on():
+                        available_power = self.power_manager.get_available_power()
+                        min_power = self.charger.get_min_power()
+                        if available_power is None or available_power < min_power:
+                            self.logger.info("Auto mode: insufficient power detected while charger on - turning off")
+                            self.charger.turn_off()
             else:
                 # Session active - check if we should stop
                 self.logger.debug(f"Session active, status={status.value}, mode={self.mode}")
