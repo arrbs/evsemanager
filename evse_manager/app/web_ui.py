@@ -536,6 +536,15 @@ HTML_TEMPLATE = """
         };
         let currentMode = null;
         let batteryPriorityOverride = false;
+        let pendingMode = null;
+        let pendingModeTimestamp = 0;
+        let pendingBatteryPriority = null;
+        let pendingBatteryTimestamp = 0;
+        const PENDING_TIMEOUT_MS = 6000;
+
+        function pendingExpired(timestamp) {
+            return (Date.now() - timestamp) > PENDING_TIMEOUT_MS;
+        }
 
         function applyModeVisualState(mode) {
             if (!mode) {
@@ -639,7 +648,13 @@ HTML_TEMPLATE = """
             
             // Current status
             document.getElementById('mode').textContent = data.mode || '-';
-            applyModeVisualState(data.mode);
+            const allowModeUpdate = !pendingMode || pendingExpired(pendingModeTimestamp) || data.mode === pendingMode;
+            if (allowModeUpdate) {
+                applyModeVisualState(data.mode);
+                if (pendingMode && data.mode === pendingMode) {
+                    pendingMode = null;
+                }
+            }
             const manualSelect = document.getElementById('manual-current');
             if (manualSelect && data.manual_current) {
                 manualSelect.value = String(data.manual_current);
@@ -657,7 +672,15 @@ HTML_TEMPLATE = """
                     autoChip.title = '';
                 }
             }
-            applyBatteryPriorityState(data.battery_priority_override);
+            const allowBatteryUpdate = pendingBatteryPriority === null
+                || pendingExpired(pendingBatteryTimestamp)
+                || !!data.battery_priority_override === pendingBatteryPriority;
+            if (allowBatteryUpdate) {
+                applyBatteryPriorityState(data.battery_priority_override);
+                if (pendingBatteryPriority !== null && !!data.battery_priority_override === pendingBatteryPriority) {
+                    pendingBatteryPriority = null;
+                }
+            }
             document.getElementById('charger-status').textContent = data.charger_status || '-';
             document.getElementById('current-amps').textContent = data.current_amps?.toFixed(1) || '-';
             document.getElementById('charging-power').textContent = data.charging_power?.toFixed(0) || '-';
@@ -820,6 +843,8 @@ HTML_TEMPLATE = """
             }
             setModeButtonsDisabled(true);
             applyModeVisualState(mode);
+            pendingMode = mode;
+            pendingModeTimestamp = Date.now();
             try {
                 const response = await apiFetch('/api/mode', {
                     method: 'POST',
@@ -831,6 +856,7 @@ HTML_TEMPLATE = """
                 await fetchStatus();
             } catch (error) {
                 showError('Failed to set mode');
+                pendingMode = null;
                 await fetchStatus();
             } finally {
                 setModeButtonsDisabled(false);
@@ -847,6 +873,8 @@ HTML_TEMPLATE = """
         async function setBatteryPriority(enabled) {
             setBatteryToggleDisabled(true);
             applyBatteryPriorityState(enabled);
+            pendingBatteryPriority = !!enabled;
+            pendingBatteryTimestamp = Date.now();
             try {
                 const response = await apiFetch('/api/battery_priority', {
                     method: 'POST',
@@ -859,6 +887,7 @@ HTML_TEMPLATE = """
             } catch (error) {
                 console.error('Error updating battery priority:', error);
                 showError('Failed to update battery priority');
+                pendingBatteryPriority = null;
                 await fetchStatus();
             } finally {
                 setBatteryToggleDisabled(false);
