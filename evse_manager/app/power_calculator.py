@@ -327,6 +327,9 @@ class PowerManager:
                 self.logger.debug(f"Power compensation: {raw_power:.0f}W - ({predicted_ev:.0f}W predicted - {reported_ev_load:.0f}W reported) = {power:.0f}W")
             
             self.last_available_power = raw_power  # Track raw power for delta detection
+        else:
+            # If no raw power available (sensor error), return 0
+            power = 0.0
         
         return power
     

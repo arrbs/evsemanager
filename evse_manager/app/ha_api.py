@@ -15,21 +15,31 @@ class HomeAssistantAPI:
         self.logger = logging.getLogger(__name__)
         
         # Get supervisor token and URL
+        # In Home Assistant add-ons, SUPERVISOR_TOKEN gives access to supervisor API
+        # For Home Assistant Core API, we need to use the hassio API role
         self.token = os.getenv('SUPERVISOR_TOKEN')
         
         if self.token:
+            # Use supervisor proxy to access core API
             self.base_url = "http://supervisor/core"
-            self.logger.info("Running in Home Assistant supervisor mode")
+            self.headers = {
+                'Authorization': f'Bearer {self.token}',
+                'Content-Type': 'application/json'
+            }
+            self.logger.info(f"Running in Home Assistant supervisor mode")
         else:
             # Fallback for development
-            self.base_url = os.getenv('HA_URL', 'http://homeassistant:8123')
+            self.base_url = os.getenv('HA_URL', 'http://homeassistant.local:8123')
             self.token = os.getenv('HA_TOKEN')
-            self.logger.warning("Running in standalone mode (no supervisor)")
-        
-        self.headers = {
-            'Authorization': f'Bearer {self.token}',
-            'Content-Type': 'application/json'
-        } if self.token else {'Content-Type': 'application/json'}
+            if self.token:
+                self.headers = {
+                    'Authorization': f'Bearer {self.token}',
+                    'Content-Type': 'application/json'
+                }
+                self.logger.info("Running in development mode with token")
+            else:
+                self.headers = {'Content-Type': 'application/json'}
+                self.logger.error("No authentication token found!")
         
         self.timeout = 10
     
