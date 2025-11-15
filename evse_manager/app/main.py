@@ -415,6 +415,31 @@ class EVSEManager:
     
     def publish_status(self):
         """Publish current status to Home Assistant."""
+        # Capture inverter telemetry for UI visibility
+        inverter_power = None
+        inverter_limiting = False
+        if hasattr(self.power_manager, 'inverter_power_entity') and self.power_manager.inverter_power_entity:
+            try:
+                raw = self.ha_api.get_state(self.power_manager.inverter_power_entity)
+                if raw is not None:
+                    inverter_power = float(raw)
+                inverter_limiting = self.power_manager.check_inverter_limit()
+            except Exception as exc:  # noqa: BLE001
+                self.logger.debug(f"Unable to read inverter telemetry: {exc}")
+                inverter_power = None
+                inverter_limiting = False
+
+        # Calculate grace-period countdown so UI can show intent
+        grace_status = None
+        if self.insufficient_power_since is not None:
+            elapsed = (datetime.now() - self.insufficient_power_since).total_seconds()
+            grace_status = {
+                'active': True,
+                'remaining_seconds': max(0, int(self.grace_period - elapsed)),
+                'total_seconds': self.grace_period,
+                'reason': 'insufficient_power'
+            }
+
         # Prepare state dict
         state = {
             'mode': self.mode,
@@ -424,6 +449,9 @@ class EVSEManager:
             'target_current': self.charger.get_current(),
             'available_power': self.power_manager.get_available_power(),
             'charging_power': self.charger.get_power() if self.session_active else 0,
+            'inverter_power': inverter_power,
+            'inverter_limiting': inverter_limiting,
+            'grace_period': grace_status,
             'session_info': self.session_manager.get_current_session_info(),
             'stats': self.session_manager.get_stats(),
             'recent_sessions': self.session_manager.get_recent_sessions(10),

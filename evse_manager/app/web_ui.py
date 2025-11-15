@@ -81,15 +81,20 @@ HTML_TEMPLATE = """
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
+            position: relative;
+        }
+        button:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
         }
         .btn-primary { background: #2196f3; color: white; }
-        .btn-primary:hover { background: #1976d2; }
+        .btn-primary:hover:not(:disabled) { background: #1976d2; }
         .btn-success { background: #4caf50; color: white; }
-        .btn-success:hover { background: #388e3c; }
+        .btn-success:hover:not(:disabled) { background: #388e3c; }
         .btn-danger { background: #f44336; color: white; }
-        .btn-danger:hover { background: #d32f2f; }
+        .btn-danger:hover:not(:disabled) { background: #d32f2f; }
         .btn-secondary { background: #999; color: white; }
-        .btn-secondary:hover { background: #777; }
+        .btn-secondary:hover:not(:disabled) { background: #777; }
         
         select {
             padding: 10px;
@@ -114,6 +119,11 @@ HTML_TEMPLATE = """
         
         .loading { text-align: center; padding: 40px; color: #999; }
         .error { background: #ffebee; color: #c62828; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        .success { background: #e8f5e9; color: #2e7d32; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        @keyframes pulse {
+            0%, 100% { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+            50% { box-shadow: 0 4px 20px rgba(255,152,0,0.4); }
+        }
     </style>
 </head>
 <body>
@@ -124,6 +134,25 @@ HTML_TEMPLATE = """
         </div>
         
         <div id="error-message" class="error" style="display: none;"></div>
+        <div id="success-message" class="success" style="display: none;"></div>
+
+        <div id="intention-panel" class="card" style="display: none; background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white; margin-bottom: 20px; animation: pulse 2s ease-in-out infinite;">
+            <h2 style="color: white; display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 24px;">⏱️</span>
+                <span>Grace Period Active</span>
+            </h2>
+            <div style="margin-top: 15px; padding: 15px; background: rgba(0,0,0,0.2); border-radius: 6px;">
+                <div style="font-size: 18px; font-weight: 600; margin-bottom: 10px;">
+                    Will stop charging in <span id="grace-countdown" style="font-size: 28px; font-weight: 700;">--</span>
+                </div>
+                <div style="font-size: 14px; opacity: 0.9;">
+                    Reason: <span id="grace-reason">Insufficient solar power</span>
+                </div>
+                <div style="margin-top: 10px; height: 8px; background: rgba(255,255,255,0.3); border-radius: 4px; overflow: hidden;">
+                    <div id="grace-progress" style="height: 100%; background: white; transition: width 1s linear;"></div>
+                </div>
+            </div>
+        </div>
         
         <div id="learning-banner" class="card" style="display: none; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; margin-bottom: 20px;">
             <h2 style="color: white;">🎓 Adaptive Learning Active</h2>
@@ -193,6 +222,16 @@ HTML_TEMPLATE = """
                         <span id="target-current">-</span>
                         <span class="metric-unit">A</span>
                     </span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Inverter Power</span>
+                    <span class="metric-value">
+                        <span id="inverter-power">-</span>
+                        <span class="metric-unit">W</span>
+                    </span>
+                </div>
+                <div class="metric" id="inverter-limit-banner" style="display: none; background: #fff3cd; margin: 10px -20px -20px; padding: 15px 20px; border-radius: 0 0 8px 8px;">
+                    <span style="color: #856404; font-weight: 600;">⚠️ Inverter limit reached</span>
                 </div>
             </div>
             
@@ -330,6 +369,25 @@ HTML_TEMPLATE = """
             // Solar power
             document.getElementById('available-power').textContent = data.available_power?.toFixed(0) || '-';
             document.getElementById('target-current').textContent = data.target_current?.toFixed(1) || '-';
+            document.getElementById('inverter-power').textContent = data.inverter_power?.toFixed(0) || '-';
+            const inverterBanner = document.getElementById('inverter-limit-banner');
+            inverterBanner.style.display = data.inverter_limiting ? 'flex' : 'none';
+            
+            // Grace period intention
+            const intentionPanel = document.getElementById('intention-panel');
+            if (data.grace_period && data.grace_period.active) {
+                intentionPanel.style.display = 'block';
+                const remaining = data.grace_period.remaining_seconds || 0;
+                const total = data.grace_period.total_seconds || 1;
+                const minutes = Math.floor(remaining / 60);
+                const seconds = remaining % 60;
+                document.getElementById('grace-countdown').textContent = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+                document.getElementById('grace-reason').textContent = data.grace_period.reason === 'insufficient_power' ? 'Insufficient solar power' : data.grace_period.reason;
+                const progress = Math.min(100, Math.max(0, ((total - remaining) / total) * 100));
+                document.getElementById('grace-progress').style.width = `${progress}%`;
+            } else {
+                intentionPanel.style.display = 'none';
+            }
             
             // Session
             if (data.session_info) {
@@ -376,6 +434,18 @@ HTML_TEMPLATE = """
             setTimeout(() => errorDiv.style.display = 'none', 5000);
         }
         
+        function showSuccess(message) {
+            const successDiv = document.getElementById('success-message');
+            successDiv.textContent = message;
+            successDiv.style.display = 'block';
+            setTimeout(() => successDiv.style.display = 'none', 3000);
+        }
+        
+        function setControlsDisabled(disabled) {
+            document.querySelectorAll('button').forEach(btn => { btn.disabled = disabled; });
+            document.querySelectorAll('select').forEach(sel => { sel.disabled = disabled; });
+        }
+        
         const ingressMatch = window.location.pathname.match(/^\/api\/hassio_ingress\/[A-Za-z0-9_-]+/);
         const basePath = ingressMatch ? ingressMatch[0] : '';
         const apiFetch = (path, options) => fetch(`${basePath}${path}`, options);
@@ -393,6 +463,7 @@ HTML_TEMPLATE = """
         }
         
         async function setMode(mode) {
+            setControlsDisabled(true);
             try {
                 const response = await apiFetch('/api/mode', {
                     method: 'POST',
@@ -400,43 +471,58 @@ HTML_TEMPLATE = """
                     body: JSON.stringify({ mode })
                 });
                 if (!response.ok) throw new Error('Failed to set mode');
-                fetchStatus();
+                showSuccess(`Switched to ${mode} mode`);
+                await fetchStatus();
             } catch (error) {
                 showError('Failed to set mode');
+            } finally {
+                setControlsDisabled(false);
             }
         }
         
         async function setManualCurrent(current) {
+            setControlsDisabled(true);
             try {
                 const response = await apiFetch('/api/manual_current', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ current: parseInt(current) })
+                    body: JSON.stringify({ current: parseInt(current, 10) })
                 });
                 if (!response.ok) throw new Error('Failed to set current');
-                fetchStatus();
+                showSuccess(`Set current to ${current}A`);
+                await fetchStatus();
             } catch (error) {
                 showError('Failed to set current');
+            } finally {
+                setControlsDisabled(false);
             }
         }
         
         async function startCharging() {
+            setControlsDisabled(true);
             try {
                 const response = await apiFetch('/api/start', { method: 'POST' });
                 if (!response.ok) throw new Error('Failed to start charging');
-                fetchStatus();
+                showSuccess('Starting charging...');
+                await fetchStatus();
             } catch (error) {
                 showError('Failed to start charging');
+            } finally {
+                setControlsDisabled(false);
             }
         }
         
         async function stopCharging() {
+            setControlsDisabled(true);
             try {
                 const response = await apiFetch('/api/stop', { method: 'POST' });
                 if (!response.ok) throw new Error('Failed to stop charging');
-                fetchStatus();
+                showSuccess('Stopping charging...');
+                await fetchStatus();
             } catch (error) {
                 showError('Failed to stop charging');
+            } finally {
+                setControlsDisabled(false);
             }
         }
         
