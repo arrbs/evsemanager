@@ -183,6 +183,8 @@ class EVSEManager:
         """
         if self.battery_priority_override:
             return True
+        if self.mode == 'manual':
+            return False
         if self.config.get('power_method') != 'battery':
             return False
         
@@ -635,6 +637,9 @@ class EVSEManager:
         car_unplugged = current_status == ChargerStatus.AVAILABLE and not self.session_active
         if car_unplugged:
             limiting_factors.append('car_unplugged')
+        vehicle_waiting = current_status == ChargerStatus.WAITING and not self.session_active
+        if vehicle_waiting:
+            limiting_factors.append('vehicle_waiting')
         if active_failed_reason == 'charger_refused':
             limiting_factors.append('charger_refused')
         elif active_failed_reason == 'vehicle_charged':
@@ -650,6 +655,8 @@ class EVSEManager:
                 auto_pause_reason = 'inverter_limit'
             elif car_unplugged:
                 auto_pause_reason = 'car_unplugged'
+            elif vehicle_waiting:
+                auto_pause_reason = 'vehicle_waiting'
         if not self.session_active and auto_pause_reason is None and active_failed_reason:
             auto_pause_reason = active_failed_reason
 
@@ -693,6 +700,11 @@ class EVSEManager:
                         'waiting_for_vehicle',
                         'Waiting for vehicle',
                         'Plug a vehicle in to let auto mode start charging.'
+                    ),
+                    'vehicle_waiting': (
+                        'vehicle_waiting',
+                        'Vehicle waiting',
+                        'The charger reports "waiting"—unplug and replug the vehicle to restart charging.'
                     ),
                     'charger_refused': (
                         'blocked_charger',

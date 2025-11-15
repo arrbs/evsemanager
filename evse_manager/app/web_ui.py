@@ -87,6 +87,7 @@ HTML_TEMPLATE = """
         .state-chip.waiting_for_battery { background: #f3e5f5; color: #6a1b9a; }
         .state-chip.manual_priority { background: #ffe0e0; color: #c62828; }
         .state-chip.waiting_for_vehicle { background: #e0f2ff; color: #0277bd; }
+        .state-chip.vehicle_waiting { background: #fff3cd; color: #a66f00; }
         .state-chip.blocked_charger { background: #fdecea; color: #c62828; }
         .state-chip.vehicle_full { background: #ede7f6; color: #4527a0; }
         .state-chip.ready { background: #e8f5e9; color: #2e7d32; }
@@ -520,6 +521,7 @@ HTML_TEMPLATE = """
             grace_period: 'Grace Period',
             insufficient_power: 'Insufficient Solar',
             car_unplugged: 'EV Not Plugged In',
+            vehicle_waiting: 'Vehicle Waiting',
             charger_refused: 'Charger Refused',
             vehicle_charged: 'Vehicle Charged'
         };
@@ -643,6 +645,8 @@ HTML_TEMPLATE = """
                     noteText = 'Auto paused because the inverter is at its limit, so the charger turned off immediately.';
                 } else if (data.auto_pause_reason === 'car_unplugged') {
                     noteText = 'EV idle because the charger reports no car connected.';
+                } else if (data.auto_pause_reason === 'vehicle_waiting') {
+                    noteText = 'The charger is stuck in "waiting"—unplug and replug the vehicle to restart charging.';
                 } else if (data.auto_pause_reason === 'charger_refused') {
                     noteText = 'Charger declined the start command twice; waiting so you can check the vehicle.';
                 } else if (data.auto_pause_reason === 'vehicle_charged') {
