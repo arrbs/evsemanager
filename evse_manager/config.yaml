@@ -1,5 +1,5 @@
 name: EVSE Manager
-version: "0.1.13"
+version: "0.1.14"
 slug: evse_manager
 description: Intelligent EVSE power management with solar optimization
 url: "https://github.com/arrbs/evsemanager"
@@ -44,10 +44,12 @@ options:
   update_interval: 5
   grace_period: 600
   hysteresis_watts: 500
+  power_smoothing_window_seconds: 120
   start_retry_attempts: 2
   start_retry_delay: 3
   start_retry_cooldown: 300
   start_handshake_window: 20
+  battery_priority_override: false
   
   log_level: "info"
 
@@ -66,8 +68,10 @@ schema:
   update_interval: int(1,60)
   grace_period: int(60,3600)
   hysteresis_watts: int(100,5000)
+  power_smoothing_window_seconds: int(30,600)
   start_retry_attempts: int(1,5)
   start_retry_delay: int(1,10)
   start_retry_cooldown: int(30,1800)
   start_handshake_window: int(5,120)
+  battery_priority_override: bool?
   log_level: list(debug|info|warning|error)

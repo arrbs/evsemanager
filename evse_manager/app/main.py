@@ -70,6 +70,7 @@ class EVSEManager:
         self.start_retry_delay = control_settings.get('start_retry_delay', 3)
         self.start_retry_cooldown = control_settings.get('start_retry_cooldown', 300)
         self.start_handshake_window = control_settings.get('start_handshake_window', 20)
+        self.battery_priority_override = control_settings.get('battery_priority_override', False)
         
         # Apply learned settings if available
         if self.adaptive_tuner and self.adaptive_tuner.should_apply_settings():
@@ -84,6 +85,7 @@ class EVSEManager:
         self.failed_start_reason = None
         self.last_failed_start_time = None
         self.startup_handshake_deadline = None
+        self.switch_reapply_attempted = False
         
         self.logger.info("="*60)
         self.logger.info("EVSE Manager initialized successfully")
@@ -141,12 +143,14 @@ class EVSEManager:
                     'update_interval': config.get('update_interval', 5),
                     'grace_period': config.get('grace_period', 600),
                     'min_session_duration': 600,
-                    'power_smoothing_window': 60,
+                    'power_smoothing_window': config.get('power_smoothing_window', 60),
+                    'power_smoothing_window_seconds': config.get('power_smoothing_window_seconds', 120),
                     'hysteresis_watts': config.get('hysteresis_watts', 500),
                     'start_retry_attempts': config.get('start_retry_attempts', 2),
                     'start_retry_delay': config.get('start_retry_delay', 3),
                     'start_retry_cooldown': config.get('start_retry_cooldown', 300),
-                    'start_handshake_window': config.get('start_handshake_window', 20)
+                    'start_handshake_window': config.get('start_handshake_window', 20),
+                    'battery_priority_override': config.get('battery_priority_override', False)
                 },
                 'adaptive': {
                     'enabled': False
@@ -176,6 +180,8 @@ class EVSEManager:
         Returns:
             True if battery needs priority (don't charge car)
         """
+        if self.battery_priority_override:
+            return True
         if self.config.get('power_method') != 'battery':
             return False
         
@@ -419,6 +425,7 @@ class EVSEManager:
         self.session_active = True
         self.insufficient_power_since = None
         self.last_failed_start_time = None
+        self.switch_reapply_attempted = False
         self.startup_handshake_deadline = (
             datetime.now() + timedelta(seconds=self.start_handshake_window)
             if self.start_handshake_window
@@ -455,6 +462,7 @@ class EVSEManager:
         self.session_manager.end_session(reason=reason)
         self.session_active = False
         self.insufficient_power_since = None
+        self.switch_reapply_attempted = False
         
         # Record trial outcome if learning
         if self.adaptive_tuner and session_info:
@@ -519,6 +527,7 @@ class EVSEManager:
         soc_entity = sensors.get('battery_soc_entity')
         power_entity = sensors.get('battery_power_entity')
         battery_priority_active = self.check_battery_priority()
+        battery_info = None
 
         if soc_entity and power_entity:
             try:
@@ -539,7 +548,8 @@ class EVSEManager:
                         'soc': soc,
                         'power': power,
                         'direction': direction,
-                        'priority_active': battery_priority_active
+                        'priority_active': battery_priority_active,
+                        'manual_override': self.battery_priority_override
                     }
             except Exception as exc:  # noqa: BLE001
                 self.logger.debug(f"Unable to capture battery telemetry: {exc}")
@@ -547,24 +557,32 @@ class EVSEManager:
 
         limiting_factors = []
         if battery_priority_active:
-            limiting_factors.append('battery_priority')
+            if self.battery_priority_override:
+                limiting_factors.append('battery_priority_override')
+            else:
+                limiting_factors.append('battery_priority')
         if inverter_limiting:
             limiting_factors.append('inverter_limit')
         if grace_status and grace_status.get('active'):
             limiting_factors.append('grace_period')
         if insufficient_power:
             limiting_factors.append('insufficient_power')
+        car_unplugged = current_status == ChargerStatus.AVAILABLE and not self.session_active
+        if car_unplugged:
+            limiting_factors.append('car_unplugged')
         if self.failed_start_reason == 'charger_refused':
             limiting_factors.append('charger_refused')
         elif self.failed_start_reason == 'vehicle_charged':
             limiting_factors.append('vehicle_charged')
 
         auto_pause_reason = None
-        if self.mode == 'auto' and not self.session_active:
+        if not self.session_active:
             if battery_priority_active:
-                auto_pause_reason = 'battery_priority'
+                auto_pause_reason = 'battery_priority_override' if self.battery_priority_override else 'battery_priority'
             elif insufficient_power:
                 auto_pause_reason = 'insufficient_power'
+            elif car_unplugged:
+                auto_pause_reason = 'car_unplugged'
         if not self.session_active and auto_pause_reason is None and self.failed_start_reason:
             auto_pause_reason = self.failed_start_reason
 
@@ -591,6 +609,7 @@ class EVSEManager:
             'auto_pause_reason': auto_pause_reason,
             'charger_transition': charger_transition,
             'grace_period': grace_status,
+            'battery_priority_override': self.battery_priority_override,
             'session_info': self.session_manager.get_current_session_info(),
             'stats': self.session_manager.get_stats(),
             'recent_sessions': self.session_manager.get_recent_sessions(10),
@@ -654,6 +673,16 @@ class EVSEManager:
                     self.logger.info("UI command: Stop charging")
                     if self.session_active:
                         self.stop_charging("user_request")
+                elif cmd_type == 'set_battery_priority':
+                    enabled = bool(command.get('enabled'))
+                    self.logger.info("UI command: Battery priority %s", "enabled" if enabled else "disabled")
+                    previous = self.battery_priority_override
+                    self.battery_priority_override = enabled
+                    if enabled and not previous:
+                        if self.session_active:
+                            self.stop_charging("battery_priority_manual")
+                    elif not enabled:
+                        self.failed_start_reason = None
                 
                 # Remove command file after processing
                 os.remove(command_file)
@@ -686,7 +715,14 @@ class EVSEManager:
                 # Session active - check if we should stop
                 self.logger.debug(f"Session active, status={status.value}, mode={self.mode}")
                 if not self.charger.is_on():
-                    self.logger.warning("Charger switch is OFF while session marked active - stopping")
+                    if not self.switch_reapply_attempted:
+                        self.logger.warning("Charger switch dropped during session - reapplying ON command")
+                        if self._ensure_charger_powered():
+                            self.switch_reapply_attempted = True
+                            return
+                        self.logger.error("Charger refused to stay on after reapply attempt")
+                    else:
+                        self.logger.error("Charger switch dropped again after reapply")
                     self._record_failed_start('charger_refused')
                     self.stop_charging("charger_switch_off")
                     return

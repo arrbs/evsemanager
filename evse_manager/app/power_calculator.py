@@ -15,11 +15,22 @@ class PowerCalculator:
         self.logger = logging.getLogger(self.__class__.__name__)
         self.ha_api = ha_api
         self.config = config
-        
-        # Smoothing
-        self.smoothing_window = config.get('power_smoothing_window', 60)
-        self.power_history = deque(maxlen=self.smoothing_window)
+        control_config = config.get('control', {})
+
+        # Smoothing (support time or sample-based windows)
+        self.smoothing_window_samples = max(1, control_config.get('power_smoothing_window', 60))
+        self.smoothing_window_seconds = control_config.get('power_smoothing_window_seconds')
+        self.power_history = deque()
         self.last_update = None
+
+    def _trim_history(self, now: float):
+        """Trim stored samples to respect smoothing configuration."""
+        if self.smoothing_window_seconds:
+            while self.power_history and (now - self.power_history[0][0]) > self.smoothing_window_seconds:
+                self.power_history.popleft()
+        else:
+            while len(self.power_history) > self.smoothing_window_samples:
+                self.power_history.popleft()
     
     def calculate_available_power(self) -> Optional[float]:
         """Calculate available excess power. Override in subclasses."""
@@ -30,17 +41,19 @@ class PowerCalculator:
         if not self.power_history:
             return None
         
-        # Simple moving average for now
-        # Could be enhanced with weighted average based on timestamps
-        return sum(self.power_history) / len(self.power_history)
+        # Simple moving average using stored samples
+        total = sum(sample[1] for sample in self.power_history)
+        return total / len(self.power_history)
     
     def update(self) -> Optional[float]:
         """Update and return available power."""
         power = self.calculate_available_power()
         
         if power is not None:
-            self.power_history.append(power)
-            self.last_update = time.time()
+            now = time.time()
+            self.power_history.append((now, power))
+            self._trim_history(now)
+            self.last_update = now
             
             smoothed = self.get_smoothed_power()
             self.logger.debug(f"Power: {power}W (smoothed: {smoothed}W)")

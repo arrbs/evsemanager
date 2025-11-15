@@ -92,6 +92,8 @@ HTML_TEMPLATE = """
             padding: 10px 0;
             border-bottom: 1px solid #eee;
         }
+        .metric.metric-explained { align-items: flex-start; }
+        .metric.metric-explained .metric-value { margin-left: auto; }
         .metric:last-child { border-bottom: none; }
         .metric-label { color: #666; font-size: 14px; }
         .metric-value { color: #333; font-size: 20px; font-weight: 600; }
@@ -154,7 +156,7 @@ HTML_TEMPLATE = """
             0%, 100% { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             50% { box-shadow: 0 4px 20px rgba(255,152,0,0.4); }
         }
-        .mode-toggle {
+        .pill-toggle {
             display: inline-flex;
             border: 1px solid #ddd;
             border-radius: 999px;
@@ -162,7 +164,7 @@ HTML_TEMPLATE = """
             background: white;
             box-shadow: inset 0 1px 2px rgba(0,0,0,0.06);
         }
-        .mode-toggle button {
+        .pill-toggle button {
             border: none;
             background: transparent;
             padding: 8px 18px;
@@ -174,14 +176,56 @@ HTML_TEMPLATE = """
             color: #777;
             transition: background 0.2s, color 0.2s;
         }
-        .mode-toggle button.active {
+        .pill-toggle button.active {
             background: #222;
             color: white;
         }
-        .mode-toggle button:not(.active):hover {
+        .pill-toggle button:not(.active):hover {
             background: rgba(0,0,0,0.05);
             color: #333;
         }
+        .flag-control {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            border: 1px solid #eee;
+            border-radius: 10px;
+            background: #f8f8f8;
+            min-width: 260px;
+            flex: 1 1 260px;
+        }
+        .flag-stack { display: flex; flex-direction: column; gap: 12px; width: 100%; }
+        .flag-title { font-size: 14px; font-weight: 600; color: #333; }
+        .flag-subtitle { font-size: 12px; color: #777; margin-top: 4px; }
+        .switch-toggle { position: relative; display: inline-block; width: 48px; height: 26px; }
+        .switch-toggle input { display: none; }
+        .switch-toggle .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.2s;
+            border-radius: 999px;
+        }
+        .switch-toggle .slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.2s;
+            border-radius: 50%;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        }
+        .switch-toggle input:checked + .slider { background: linear-gradient(135deg, #4caf50, #2e7d32); }
+        .switch-toggle input:checked + .slider:before { transform: translateX(22px); }
+        .metric-subtext { display: block; font-size: 12px; color: #888; margin-top: 4px; max-width: 220px; }
         .chip-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
         .chip {
             padding: 6px 12px;
@@ -377,7 +421,7 @@ HTML_TEMPLATE = """
         <div class="card">
             <h2>Controls</h2>
             <div class="controls">
-                <div class="mode-toggle">
+                <div class="pill-toggle">
                     <button id="mode-manual-btn" class="active" onclick="handleModeButton('manual')">Manual</button>
                     <button id="mode-auto-btn" onclick="handleModeButton('auto')">Auto</button>
                 </div>
@@ -394,6 +438,18 @@ HTML_TEMPLATE = """
                     <button class="btn-success" onclick="startCharging()">Start Charging</button>
                 </div>
                 <button class="btn-danger" onclick="stopCharging()">Stop Charging</button>
+                <div class="flag-stack">
+                    <div class="flag-control">
+                        <div>
+                            <div class="flag-title">Battery Priority</div>
+                            <div class="flag-subtitle" id="battery-priority-note">Pause EV charging to refill the house battery.</div>
+                        </div>
+                        <label class="switch-toggle">
+                            <input type="checkbox" id="battery-priority-toggle" onchange="handleBatteryPriorityToggle(this.checked)">
+                            <span class="slider"></span>
+                        </label>
+                    </div>
+                </div>
             </div>
         </div>
         
@@ -411,8 +467,11 @@ HTML_TEMPLATE = """
                         <span class="metric-unit">kWh</span>
                     </span>
                 </div>
-                <div class="metric">
-                    <span class="metric-label">Avg Solar %</span>
+                <div class="metric metric-explained">
+                    <div>
+                        <span class="metric-label">Avg Solar %</span>
+                        <span class="metric-subtext">Share of total EV energy supplied by solar.</span>
+                    </div>
                     <span class="metric-value">
                         <span id="avg-solar">-</span>
                         <span class="metric-unit">%</span>
@@ -432,13 +491,16 @@ HTML_TEMPLATE = """
     <script>
         const LIMITING_LABELS = {
             battery_priority: 'Battery Priority',
+            battery_priority_override: 'Battery Priority (Manual)',
             inverter_limit: 'Inverter Limit',
             grace_period: 'Grace Period',
             insufficient_power: 'Insufficient Solar',
+            car_unplugged: 'EV Not Plugged In',
             charger_refused: 'Charger Refused',
             vehicle_charged: 'Vehicle Charged'
         };
         let currentMode = null;
+        let batteryPriorityOverride = false;
 
         function formatDuration(seconds) {
             if (!seconds) return '-';
@@ -517,6 +579,17 @@ HTML_TEMPLATE = """
             if (manualSelect && data.manual_current) {
                 manualSelect.value = String(data.manual_current);
             }
+            batteryPriorityOverride = !!data.battery_priority_override;
+            const priorityToggle = document.getElementById('battery-priority-toggle');
+            if (priorityToggle) {
+                priorityToggle.checked = batteryPriorityOverride;
+            }
+            const priorityNote = document.getElementById('battery-priority-note');
+            if (priorityNote) {
+                priorityNote.textContent = batteryPriorityOverride
+                    ? 'Manual battery priority is holding EV charging.'
+                    : 'Pause EV charging to refill the house battery.';
+            }
             document.getElementById('charger-status').textContent = data.charger_status || '-';
             document.getElementById('current-amps').textContent = data.current_amps?.toFixed(1) || '-';
             document.getElementById('charging-power').textContent = data.charging_power?.toFixed(0) || '-';
@@ -527,6 +600,10 @@ HTML_TEMPLATE = """
                     noteText = 'Auto paused: not enough solar to reach minimum charger current.';
                 } else if (data.auto_pause_reason === 'battery_priority') {
                     noteText = 'Battery priority is holding charging until SOC recovers.';
+                } else if (data.auto_pause_reason === 'battery_priority_override') {
+                    noteText = 'You turned on battery priority, so EV charging will stay paused.';
+                } else if (data.auto_pause_reason === 'car_unplugged') {
+                    noteText = 'EV idle because the charger reports no car connected.';
                 } else if (data.auto_pause_reason === 'charger_refused') {
                     noteText = 'Charger declined the start command twice; waiting so you can check the vehicle.';
                 } else if (data.auto_pause_reason === 'vehicle_charged') {
@@ -644,6 +721,7 @@ HTML_TEMPLATE = """
         function setControlsDisabled(disabled) {
             document.querySelectorAll('button').forEach(btn => { btn.disabled = disabled; });
             document.querySelectorAll('select').forEach(sel => { sel.disabled = disabled; });
+            document.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.disabled = disabled; });
         }
         
         const ingressMatch = window.location.pathname.match(/^\/api\/hassio_ingress\/[A-Za-z0-9_-]+/);
@@ -688,6 +766,34 @@ HTML_TEMPLATE = """
                 return;
             }
             setMode(mode);
+        }
+
+        async function setBatteryPriority(enabled) {
+            setControlsDisabled(true);
+            try {
+                const response = await apiFetch('/api/battery_priority', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                if (!response.ok) throw new Error('Failed to update battery priority');
+                showSuccess(enabled ? 'Battery priority enabled' : 'Battery priority disabled');
+                await fetchStatus();
+            } catch (error) {
+                console.error('Error updating battery priority:', error);
+                showError('Failed to update battery priority');
+                const toggle = document.getElementById('battery-priority-toggle');
+                if (toggle) toggle.checked = batteryPriorityOverride;
+            } finally {
+                setControlsDisabled(false);
+            }
+        }
+
+        function handleBatteryPriorityToggle(enabled) {
+            if (batteryPriorityOverride === enabled) {
+                return;
+            }
+            setBatteryPriority(enabled);
         }
         
         async function setManualCurrent(current) {
@@ -801,6 +907,17 @@ def api_set_manual_current():
         json.dump({'command': 'set_manual_current', 'current': current}, f)
     
     return jsonify({'success': True})
+
+
+@app.route('/api/battery_priority', methods=['POST'])
+def api_set_battery_priority():
+    """Toggle manual battery priority."""
+    data = request.get_json()
+    enabled = bool(data.get('enabled'))
+    command_file = Path('/data/command.json')
+    with open(command_file, 'w') as f:
+        json.dump({'command': 'set_battery_priority', 'enabled': enabled}, f)
+    return jsonify({'success': True, 'enabled': enabled})
 
 
 @app.route('/api/start', methods=['POST'])
