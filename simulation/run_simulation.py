@@ -77,7 +77,7 @@ class SimulationRunner:
         # Create EVSE manager components
         self.charger_controller = ChargerController(
             ha_api=self.ha_api,
-            charger_config=config['charger']
+            config=config['charger']
         )
         
         self.power_manager = PowerManager(
@@ -150,29 +150,32 @@ class SimulationRunner:
         # Update charger simulator
         actual_ev_load = self.charger_sim.update(self.dt)
         
-        # Run EVSE manager logic (if car connected)
+            # Run EVSE manager logic (if car connected)
         if self.charger_sim.car_connected:
             # Calculate available power
             available_power = self.power_manager.get_available_power()
             
+            # Calculate minimum charge power
+            min_current = min(self.config['charger']['allowed_currents'])
+            min_charge_power = min_current * self.config['charger']['default_voltage']
+            
             # Determine if should be charging
             if not self.is_charging:
                 # Check if should start
-                if available_power >= self.charger_controller.min_charge_power:
-                    target_current = self.charger_controller.power_to_current(available_power)
+                if available_power >= min_charge_power:
+                    target_current = self.charger_controller.watts_to_amps(available_power)
                     if target_current >= min(self.config['charger']['allowed_currents']):
                         self.logger.info(
                             f"[{self.time}s] Starting charge: {available_power:.0f}W available "
                             f"-> {target_current:.1f}A"
                         )
-                        self.charger_controller.start_charging(target_current)
                         self.charger_sim.turn_on()
                         self.charger_sim.set_current(target_current)
                         self.is_charging = True
                         self.current_session_id = self.session_manager.start_session()
             else:
                 # Already charging - adjust power
-                target_current = self.charger_controller.power_to_current(available_power)
+                target_current = self.charger_controller.watts_to_amps(available_power)
                 
                 # Check if should stop
                 if target_current < min(self.config['charger']['allowed_currents']):
@@ -181,16 +184,16 @@ class SimulationRunner:
                         f"[{self.time}s] Stopping charge: insufficient power "
                         f"({available_power:.0f}W)"
                     )
-                    self.charger_controller.stop_charging()
                     self.charger_sim.turn_off()
                     self.is_charging = False
                     if self.current_session_id:
                         self.session_manager.end_session(self.current_session_id)
                         self.current_session_id = None
                 else:
-                    # Adjust current
-                    self.charger_controller.adjust_current(target_current)
-                    self.charger_sim.set_current(self.charger_controller.current_amps)
+                    # Adjust current - find nearest allowed current
+                    nearest_current = min(self.config['charger']['allowed_currents'], 
+                                        key=lambda x: abs(x - target_current))
+                    self.charger_sim.set_current(nearest_current)
                     
         # Advance time
         self.power_sim.advance_time(self.dt)
@@ -331,10 +334,7 @@ class SimulationRunner:
 
 def load_config() -> Dict[str, Any]:
     """Load configuration from config.yaml."""
-    import yaml
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'config.yaml')
-    
-    # Default config for simulation
+    # Default config for simulation (don't need to parse actual config.yaml for simulation)
     return {
         'charger': {
             'name': 'Simulated EVSE',

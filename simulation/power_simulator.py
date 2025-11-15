@@ -48,10 +48,12 @@ class PowerSimulator:
             self.cloud_factor = 1.0
             self.cloud_frequency = 0.0
             self.battery_soc = 85
+            self.time_offset = 9 * 3600  # Start at 9 AM (good solar)
         elif self.scenario == "cloudy_day":
             self.cloud_factor = 0.4
             self.cloud_frequency = 0.3
             self.battery_soc = 60
+            self.time_offset = 9 * 3600  # Start at 9 AM
         elif self.scenario == "morning_ramp":
             self.time_offset = 6 * 3600  # Start at 6 AM
             self.cloud_factor = 0.9
@@ -64,6 +66,7 @@ class PowerSimulator:
             self.cloud_factor = 0.7
             self.cloud_frequency = 0.15
             self.battery_soc = 70
+            self.time_offset = 10 * 3600  # Start at 10 AM
             
     def get_time_of_day(self) -> float:
         """Get current hour of day (0-24)."""
