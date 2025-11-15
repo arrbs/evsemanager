@@ -101,6 +101,7 @@ class BatteryCalculator(PowerCalculator):
         super().__init__(ha_api, config)
         self.battery_soc_entity = config['sensors']['battery_soc_entity']
         self.battery_power_entity = config['sensors']['battery_power_entity']
+        self.battery_power_charging_positive = config['sensors'].get('battery_power_charging_positive', False)
         self.high_soc = config['sensors'].get('battery_high_soc', 95)
         self.priority_soc = config['sensors'].get('battery_priority_soc', 80)
         self.target_discharge_min = config['sensors'].get('battery_target_discharge_min', 0)
@@ -109,11 +110,19 @@ class BatteryCalculator(PowerCalculator):
         # Optional: use grid export sensor as fallback when battery is full
         self.grid_power_entity = config['sensors'].get('grid_power_entity')
         
-        self.logger.info(f"Using battery method: SOC={self.battery_soc_entity}, Power={self.battery_power_entity}")
+        self.logger.info(
+            f"Using battery method: SOC={self.battery_soc_entity}, Power={self.battery_power_entity}"
+        )
+        direction = "positive" if self.battery_power_charging_positive else "negative"
+        self.logger.info(f"Battery charging reported as {direction} power")
         self.logger.info(f"High SOC threshold: {self.high_soc}%, Priority: {self.priority_soc}%")
         if self.grid_power_entity:
             self.logger.info(f"Grid sensor available for enhanced detection: {self.grid_power_entity}")
     
+    def _normalize_battery_power(self, battery_power: float) -> float:
+        """Convert raw sensor value so positive means discharging."""
+        return -battery_power if self.battery_power_charging_positive else battery_power
+
     def calculate_available_power(self) -> Optional[float]:
         """
         Calculate available power based on battery state.
@@ -132,9 +141,9 @@ class BatteryCalculator(PowerCalculator):
         
         soc = float(soc)
         battery_power = float(battery_power)
+        normalized_power = self._normalize_battery_power(battery_power)
         
-        # Negative battery power = charging (excess available)
-        # Positive battery power = discharging (consuming stored energy)
+        # normalized_power: positive = discharging, negative = charging
         
         if soc < self.priority_soc:
             # Battery has priority - no excess for car
@@ -143,13 +152,13 @@ class BatteryCalculator(PowerCalculator):
         
         elif soc < self.high_soc:
             # Battery still charging - available power is what's going into battery
-            if battery_power < 0:
-                available = -battery_power
-                self.logger.debug(f"Battery charging at {-battery_power}W (SOC {soc}%)")
+            if normalized_power < 0:
+                available = -normalized_power
+                self.logger.debug(f"Battery charging at {available}W (SOC {soc}%)")
                 return available
             else:
                 # Battery discharging but below high threshold - reduce consumption
-                self.logger.debug(f"Battery discharging {battery_power}W (SOC {soc}%)")
+                self.logger.debug(f"Battery discharging {normalized_power}W (SOC {soc}%)")
                 return 0.0
         
         else:
@@ -160,42 +169,42 @@ class BatteryCalculator(PowerCalculator):
             if soc > 95:
                 # Battery full - probe upward until it discharges
                 # When battery at 0W, PV may be curtailed - keep probing to find actual solar limit
-                if battery_power <= 0:
+                if normalized_power <= 0:
                     # Not discharging - either charging or at 0W (curtailed PV)
                     # Keep stepping up to discover actual solar capacity
                     available = 5000  # Signal: keep stepping up
-                    if battery_power < -100:
+                    if normalized_power < -100:
                         self.logger.info(
-                            f"Battery >95% charging {-battery_power}W - probing upward"
+                            f"Battery >95% charging {-normalized_power}W - probing upward"
                         )
                 else:
                     # Battery discharging - we've exceeded actual solar, reduce EVSE
-                    available = self.target_discharge_max - battery_power
+                    available = self.target_discharge_max - normalized_power
                     self.logger.info(
-                        f"Battery discharging {battery_power}W - exceeded solar limit, reducing"
+                        f"Battery discharging {normalized_power}W - exceeded solar limit, reducing"
                     )
                 return available
             
             else:
                 # Normal mode - keep battery roughly stable
                 # Target: small discharge (0-1500W)
-                if battery_power < -500:
+                if normalized_power < -500:
                     # Charging too much - can increase EVSE
-                    available = -battery_power + self.target_discharge_max
+                    available = -normalized_power + self.target_discharge_max
                     self.logger.info(
-                        f"Battery charging {-battery_power}W - can increase EVSE"
+                        f"Battery charging {-normalized_power}W - can increase EVSE"
                     )
-                elif battery_power <= self.target_discharge_max:
+                elif normalized_power <= self.target_discharge_max:
                     # In target range - small adjustments
-                    available = self.target_discharge_max - battery_power
+                    available = self.target_discharge_max - normalized_power
                     self.logger.info(
-                        f"Battery at {battery_power}W - in target range"
+                        f"Battery at {normalized_power}W - in target range"
                     )
                 else:
                     # Discharging too much - need to decrease EVSE
-                    available = self.target_discharge_max - battery_power  # Will be negative
+                    available = self.target_discharge_max - normalized_power  # Will be negative
                     self.logger.info(
-                        f"Battery discharging {battery_power}W - need to decrease EVSE"
+                        f"Battery discharging {normalized_power}W - need to decrease EVSE"
                     )
                 return available
 

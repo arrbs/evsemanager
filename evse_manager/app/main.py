@@ -415,6 +415,12 @@ class EVSEManager:
     
     def publish_status(self):
         """Publish current status to Home Assistant."""
+        current_status = self.charger.get_status()
+        current_amps = self.charger.get_current() or 0
+        target_current = self.power_manager.commanded_current or current_amps
+        charging_power = self.charger.get_power() if self.session_active else 0
+        available_power = self.power_manager.get_available_power()
+
         # Capture inverter telemetry for UI visibility
         inverter_power = None
         inverter_limiting = False
@@ -440,17 +446,59 @@ class EVSEManager:
                 'reason': 'insufficient_power'
             }
 
+        # Battery telemetry for UI insight
+        battery_info = None
+        sensors = self.config.get('sensors', {})
+        soc_entity = sensors.get('battery_soc_entity')
+        power_entity = sensors.get('battery_power_entity')
+        battery_priority_active = self.check_battery_priority()
+
+        if soc_entity and power_entity:
+            try:
+                raw_soc = self.ha_api.get_state(soc_entity)
+                raw_power = self.ha_api.get_state(power_entity)
+                if raw_soc is not None and raw_power is not None:
+                    soc = float(raw_soc)
+                    power = float(raw_power)
+                    charging_positive = sensors.get('battery_power_charging_positive', False)
+                    if charging_positive:
+                        charging = power > 50
+                        discharging = power < -50
+                    else:
+                        charging = power < -50
+                        discharging = power > 50
+                    direction = 'charging' if charging else 'discharging' if discharging else 'idle'
+                    battery_info = {
+                        'soc': soc,
+                        'power': power,
+                        'direction': direction,
+                        'priority_active': battery_priority_active
+                    }
+            except Exception as exc:  # noqa: BLE001
+                self.logger.debug(f"Unable to capture battery telemetry: {exc}")
+                battery_info = None
+
+        limiting_factors = []
+        if battery_priority_active:
+            limiting_factors.append('battery_priority')
+        if inverter_limiting:
+            limiting_factors.append('inverter_limit')
+        if grace_status and grace_status.get('active'):
+            limiting_factors.append('grace_period')
+
         # Prepare state dict
         state = {
             'mode': self.mode,
             'status': 'active' if self.session_active else 'idle',
-            'charger_status': self.charger.get_status().value,
-            'current_amps': self.charger.get_current() or 0,
-            'target_current': self.charger.get_current(),
-            'available_power': self.power_manager.get_available_power(),
-            'charging_power': self.charger.get_power() if self.session_active else 0,
+            'charger_status': current_status.value,
+            'current_amps': current_amps,
+            'target_current': target_current,
+            'available_power': available_power,
+            'charging_power': charging_power,
             'inverter_power': inverter_power,
             'inverter_limiting': inverter_limiting,
+            'battery': battery_info,
+            'limiting_factors': limiting_factors,
             'grace_period': grace_status,
             'session_info': self.session_manager.get_current_session_info(),
             'stats': self.session_manager.get_stats(),

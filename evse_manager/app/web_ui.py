@@ -54,8 +54,13 @@ HTML_TEMPLATE = """
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: box-shadow 0.3s ease, border-color 0.3s ease;
         }
         .card h2 { color: #333; font-size: 18px; margin-bottom: 15px; }
+        .card-warning {
+            border: 2px solid #ff9800;
+            box-shadow: 0 4px 20px rgba(255,152,0,0.3);
+        }
         .metric {
             display: flex;
             justify-content: space-between;
@@ -124,6 +129,17 @@ HTML_TEMPLATE = """
             0%, 100% { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             50% { box-shadow: 0 4px 20px rgba(255,152,0,0.4); }
         }
+        .chip-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+        .chip {
+            padding: 6px 12px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            background: #eee;
+            color: #555;
+        }
+        .chip-warning { background: #fff3cd; color: #856404; }
+        .chip-danger { background: #fdecea; color: #c62828; }
     </style>
 </head>
 <body>
@@ -235,6 +251,35 @@ HTML_TEMPLATE = """
                 </div>
             </div>
             
+            <div class="card" id="battery-card">
+                <h2>Battery & Limits</h2>
+                <div class="metric">
+                    <span class="metric-label">Battery SOC</span>
+                    <span class="metric-value">
+                        <span id="battery-soc">-</span>
+                        <span class="metric-unit">%</span>
+                    </span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Battery Flow</span>
+                    <span class="metric-value">
+                        <span id="battery-power">-</span>
+                        <span class="metric-unit">W</span>
+                    </span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Direction</span>
+                    <span class="metric-value" id="battery-direction">-</span>
+                </div>
+                <div class="metric">
+                    <span class="metric-label">Priority</span>
+                    <span class="metric-value" id="battery-priority">-</span>
+                </div>
+                <div class="chip-list" id="limiting-factors">
+                    <span class="chip">No limits active</span>
+                </div>
+            </div>
+            
             <div class="card">
                 <h2>Current Session</h2>
                 <div class="metric">
@@ -310,11 +355,21 @@ HTML_TEMPLATE = """
     </div>
     
     <script>
+        const LIMITING_LABELS = {
+            battery_priority: 'Battery Priority',
+            inverter_limit: 'Inverter Limit',
+            grace_period: 'Grace Period'
+        };
+
         function formatDuration(seconds) {
             if (!seconds) return '-';
             const hours = Math.floor(seconds / 3600);
             const minutes = Math.floor((seconds % 3600) / 60);
             return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+        }
+
+        function formatNumber(value, digits = 1) {
+            return typeof value === 'number' ? value.toFixed(digits) : '-';
         }
         
         function updateUI(data) {
@@ -372,6 +427,32 @@ HTML_TEMPLATE = """
             document.getElementById('inverter-power').textContent = data.inverter_power?.toFixed(0) || '-';
             const inverterBanner = document.getElementById('inverter-limit-banner');
             inverterBanner.style.display = data.inverter_limiting ? 'flex' : 'none';
+            const batteryCard = document.getElementById('battery-card');
+            const batteryData = data.battery;
+            if (batteryData) {
+                document.getElementById('battery-soc').textContent = formatNumber(batteryData.soc, 1);
+                document.getElementById('battery-power').textContent = formatNumber(batteryData.power, 0);
+                document.getElementById('battery-direction').textContent = (batteryData.direction || '-').replace(/(^|\s)\w/g, m => m.toUpperCase());
+                document.getElementById('battery-priority').textContent = batteryData.priority_active ? 'Active' : 'Idle';
+            } else {
+                document.getElementById('battery-soc').textContent = '-';
+                document.getElementById('battery-power').textContent = '-';
+                document.getElementById('battery-direction').textContent = '-';
+                document.getElementById('battery-priority').textContent = '-';
+            }
+            const limitingFactors = data.limiting_factors || [];
+            const limitingContainer = document.getElementById('limiting-factors');
+            if (limitingFactors.length === 0) {
+                limitingContainer.innerHTML = '<span class="chip">No limits active</span>';
+            } else {
+                limitingContainer.innerHTML = limitingFactors.map(factor => {
+                    const label = LIMITING_LABELS[factor] || factor;
+                    const chipClass = factor === 'inverter_limit' ? 'chip chip-danger' : 'chip chip-warning';
+                    return `<span class="${chipClass}">${label}</span>`;
+                }).join('');
+            }
+            const highlightLimits = limitingFactors.includes('battery_priority') || limitingFactors.includes('grace_period');
+            batteryCard.classList.toggle('card-warning', highlightLimits);
             
             // Grace period intention
             const intentionPanel = document.getElementById('intention-panel');
@@ -528,7 +609,7 @@ HTML_TEMPLATE = """
         
         // Initial fetch and auto-refresh
         fetchStatus();
-        setInterval(fetchStatus, 5000);
+        setInterval(fetchStatus, 2000);
     </script>
 </body>
 </html>

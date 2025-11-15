@@ -42,6 +42,7 @@ power_method: "battery"
 sensors:
   battery_soc_entity: "sensor.ss_battery_soc"
   battery_power_entity: "sensor.ss_battery_power"
+  battery_power_charging_positive: false
   battery_high_soc: 95
   battery_priority_soc: 80
   battery_target_discharge_min: 0

@@ -116,6 +116,7 @@ power_method: "battery"
 sensors:
   battery_soc_entity: "sensor.battery_soc"
   battery_power_entity: "sensor.battery_power"  # Negative = charging
+  battery_power_charging_positive: false          # Set true if your sensor reports positive while charging
   battery_high_soc: 95          # Above this, try to discharge battery
   battery_priority_soc: 80      # Below this, battery has priority
   battery_target_discharge_min: 0    # Target discharge range when full
@@ -155,6 +156,7 @@ power_method: "battery"
 sensors:
   battery_soc_entity: "sensor.ss_battery_soc"
   battery_power_entity: "sensor.ss_battery_power"
+  battery_power_charging_positive: false
   battery_high_soc: 95
   battery_priority_soc: 80
   battery_target_discharge_min: 0
