@@ -229,9 +229,9 @@ def visualize_scenario(results_file: str):
     
     # Timeline graphs
     if history:
-        print("=" * 100)
+        print("=" * 160)
         print("TIMELINE VISUALIZATION")
-        print("=" * 100)
+        print("=" * 160)
         print()
         
         # Extract data series
@@ -249,9 +249,9 @@ def visualize_scenario(results_file: str):
         
         # Time axis
         duration_hours = summary['duration_hours']
-        width = 80
+        width = 144  # Higher resolution - 6 samples per hour for 24h
         time_labels = "            " + " " * 7 + "└"
-        step = max(1, int(duration_hours / 8))  # Show ~8 time markers
+        step = max(1, int(duration_hours / 12))  # Show ~12 time markers
         for i in range(0, int(duration_hours) + 1, step):
             pos = int((i / duration_hours) * width)
             time_labels += " " * (pos - len(time_labels) + 20) + f"{i}h"

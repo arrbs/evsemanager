@@ -11,26 +11,48 @@ import threading
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 
-from charger_controller import ChargerController, ChargerStatus
-from power_calculator import PowerManager
-from session_manager import SessionManager, AdaptiveTuner
-from ha_api import HomeAssistantAPI, EntityPublisher
+from app.charger_controller import ChargerController, ChargerStatus
+from app.power_calculator import PowerManager
+from app.session_manager import SessionManager, AdaptiveTuner
+try:
+    from app.ha_api import HomeAssistantAPI, EntityPublisher
+except ImportError:
+    # In simulation environment, these will be provided as mock objects
+    HomeAssistantAPI = None
+    EntityPublisher = None
 
 
 class EVSEManager:
     """Main EVSE Manager class with intelligent solar-based charging."""
 
-    def __init__(self):
+    def __init__(self, ha_api=None, config=None, data_dir=None):
         """Initialize the EVSE Manager."""
-        self.config = self._load_config()
+        self.config = config if config is not None else self._load_config()
         self._setup_logging()
         
         # Initialize components
-        self.ha_api = HomeAssistantAPI()
+        if ha_api is not None:
+            # Simulation mode - use provided mock API
+            self.ha_api = ha_api
+        else:
+            # Production mode - create real HA API
+            if HomeAssistantAPI is None:
+                raise RuntimeError("HomeAssistantAPI not available - missing requests module")
+            self.ha_api = HomeAssistantAPI()
+        
         self.charger = ChargerController(self.ha_api, self.config['charger'])
         self.power_manager = PowerManager(self.ha_api, self.config)
-        self.session_manager = SessionManager()
-        self.entity_publisher = EntityPublisher(self.ha_api)
+        
+        # Use provided data_dir or default to /data
+        session_data_dir = data_dir if data_dir is not None else "/data"
+        self.session_manager = SessionManager(session_data_dir)
+        
+        # Entity publisher may be mock or real
+        if hasattr(self.ha_api, '__class__') and 'Mock' in self.ha_api.__class__.__name__:
+            # Mock API provides its own entity publisher
+            self.entity_publisher = None
+        else:
+            self.entity_publisher = EntityPublisher(self.ha_api)
         
         # Initialize adaptive tuner if enabled
         adaptive_config = self.config.get('adaptive', {})
@@ -138,9 +160,8 @@ class EVSEManager:
             self.logger.debug(f"Charger status not ready: {status}")
             return False
         
-        # Check battery priority
-        if self.check_battery_priority():
-            return False
+        # Battery priority only applies to active sessions (checked in update() loop)
+        # Don't prevent starting - we check available power below which handles this
         
         # In auto mode, check if we have enough power
         if self.mode == 'auto':
@@ -196,6 +217,8 @@ class EVSEManager:
         # Calculate target current based on available power
         target_amps = self.power_manager.get_target_current(self.charger, current_amps)
         
+        self.logger.info(f"Auto mode: current={current_amps}A, target={target_amps}A")
+        
         if target_amps is not None and target_amps != current_amps:
             # Try to adjust current
             if self.charger.can_adjust_now():
@@ -203,6 +226,8 @@ class EVSEManager:
                 success = self.charger.set_current_step(target_amps)
                 
                 if success:
+                    # Update power manager with commanded current for predictive compensation
+                    self.power_manager.set_commanded_current(target_amps)
                     self.session_manager.record_adjustment()
                     self.last_adjustment_time = datetime.now()
                 
@@ -295,6 +320,8 @@ class EVSEManager:
             target = self.charger.allowed_currents[0]
         
         self.charger.set_current_step(target, force=True)
+        # Update power manager with commanded current
+        self.power_manager.set_commanded_current(target)
     
     def stop_charging(self, reason: str = "normal"):
         """Stop charging session."""
@@ -404,50 +431,53 @@ class EVSEManager:
         except Exception as e:
             self.logger.error(f"Error processing command: {e}")
     
+    def update(self):
+        """Single update cycle - for simulation or single-step operation."""
+        try:
+            # Check for UI commands
+            self.check_commands()
+            
+            status = self.charger.get_status()
+            self.logger.debug(f"Charger status: {status.value}")
+            
+            # Check if we should start or stop
+            if not self.session_active:
+                if self.should_start_charging():
+                    self.start_charging()
+            else:
+                # Session active - check if we should stop
+                self.logger.debug(f"Session active, status={status.value}, mode={self.mode}")
+                if status in [ChargerStatus.AVAILABLE, ChargerStatus.CHARGED]:
+                    self.stop_charging("car_disconnected")
+                elif status == ChargerStatus.FAULT:
+                    self.stop_charging("fault")
+                elif self.check_battery_priority():
+                    self.stop_charging("battery_priority")
+                else:
+                    # Continue charging - handle mode-specific logic
+                    if self.mode == 'auto':
+                        self.handle_auto_mode()
+                    else:
+                        self.handle_manual_mode()
+                    
+                    # Update session data
+                    self.update_session_data()
+            
+            # Publish status periodically (every 10 seconds)
+            if self.entity_publisher and (self.last_status_publish is None or \
+               (datetime.now() - self.last_status_publish).total_seconds() > 10):
+                self.publish_status()
+                
+        except Exception as e:
+            self.logger.error(f"Error in update cycle: {e}", exc_info=True)
+    
     def control_loop(self):
         """Main control loop."""
         self.logger.info("Control loop started")
         
         while self.is_running:
-            try:
-                # Check for UI commands
-                self.check_commands()
-                
-                status = self.charger.get_status()
-                self.logger.debug(f"Charger status: {status.value}")
-                
-                # Check if we should start or stop
-                if not self.session_active:
-                    if self.should_start_charging():
-                        self.start_charging()
-                else:
-                    # Session active - check if we should stop
-                    if status in [ChargerStatus.AVAILABLE, ChargerStatus.CHARGED]:
-                        self.stop_charging("car_disconnected")
-                    elif status == ChargerStatus.FAULT:
-                        self.stop_charging("fault")
-                    elif self.check_battery_priority():
-                        self.stop_charging("battery_priority")
-                    else:
-                        # Continue charging - handle mode-specific logic
-                        if self.mode == 'auto':
-                            self.handle_auto_mode()
-                        else:
-                            self.handle_manual_mode()
-                        
-                        # Update session data
-                        self.update_session_data()
-                
-                # Publish status periodically (every 10 seconds)
-                if self.last_status_publish is None or \
-                   (datetime.now() - self.last_status_publish).total_seconds() > 10:
-                    self.publish_status()
-                
-                time.sleep(self.update_interval)
-                
-            except Exception as e:
-                self.logger.error(f"Error in control loop: {e}", exc_info=True)
-                time.sleep(self.update_interval)
+            self.update()
+            time.sleep(self.update_interval)
     
     def run(self):
         """Start the EVSE Manager."""

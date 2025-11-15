@@ -153,67 +153,51 @@ class BatteryCalculator(PowerCalculator):
                 return 0.0
         
         else:
-            # SOC >= high_soc: Try to maintain target discharge
-            # We want battery to discharge between target_discharge_min and target_discharge_max
-            # This tells us how much excess solar is really available
+            # SOC >= high_soc: Simple probing logic
+            # 1. Battery >95%: step up until it starts discharging
+            # 2. Normal: keep battery roughly stable (small discharge ok)
             
-            if battery_power < 0:
-                # Still charging - we have lots of excess
-                # All charging power is excess, plus we want to shift to mild discharge
-                available = -battery_power + self.target_discharge_max
-                
-                # Enhancement: If battery is nearly full and we have grid export sensor,
-                # also add grid export to available power (it's being wasted)
-                if soc >= 99 and self.grid_power_entity:
-                    grid_power = self.ha_api.get_state(self.grid_power_entity)
-                    if grid_power is not None:
-                        grid_power = float(grid_power)
-                        # Negative grid power = export (wasted power we could use)
-                        if grid_power < 0:
-                            export_power = -grid_power
-                            available += export_power
-                            self.logger.debug(
-                                f"Battery full ({soc}%), charging {-battery_power}W + "
-                                f"grid export {export_power}W = {available}W available"
-                            )
-                            return available
-                
-                self.logger.debug(f"Battery charging at {-battery_power}W (SOC {soc}% high) - targeting discharge")
+            if soc > 95:
+                # Battery full - probe upward until it discharges
+                # When battery at 0W, PV may be curtailed - keep probing to find actual solar limit
+                if battery_power <= 0:
+                    # Not discharging - either charging or at 0W (curtailed PV)
+                    # Keep stepping up to discover actual solar capacity
+                    available = 5000  # Signal: keep stepping up
+                    if battery_power < -100:
+                        self.logger.info(
+                            f"Battery >95% charging {-battery_power}W - probing upward"
+                        )
+                else:
+                    # Battery discharging - we've exceeded actual solar, reduce EVSE
+                    available = self.target_discharge_max - battery_power
+                    self.logger.info(
+                        f"Battery discharging {battery_power}W - exceeded solar limit, reducing"
+                    )
                 return available
-            
-            elif battery_power < self.target_discharge_min:
-                # Not discharging enough - we have excess available
-                # We want to increase car load to push battery into target discharge range
-                available = self.target_discharge_max - battery_power
-                
-                # Enhancement: Also check for grid export when battery nearly full
-                if soc >= 99 and self.grid_power_entity:
-                    grid_power = self.ha_api.get_state(self.grid_power_entity)
-                    if grid_power is not None:
-                        grid_power = float(grid_power)
-                        if grid_power < 0:
-                            export_power = -grid_power
-                            available += export_power
-                            self.logger.debug(
-                                f"Battery full ({soc}%), low discharge + "
-                                f"grid export {export_power}W = {available}W available"
-                            )
-                            return available
-                
-                self.logger.debug(f"Battery discharge {battery_power}W too low - available: {available}W")
-                return available
-            
-            elif battery_power > self.target_discharge_max:
-                # Discharging too much - reduce car load
-                # This is actually negative "available" power
-                deficit = battery_power - self.target_discharge_max
-                self.logger.debug(f"Battery discharge {battery_power}W too high - need to reduce: {deficit}W")
-                return -deficit
             
             else:
-                # In target range - maintain current level
-                self.logger.debug(f"Battery discharge {battery_power}W in target range")
-                return 0.0
+                # Normal mode - keep battery roughly stable
+                # Target: small discharge (0-1500W)
+                if battery_power < -500:
+                    # Charging too much - can increase EVSE
+                    available = -battery_power + self.target_discharge_max
+                    self.logger.info(
+                        f"Battery charging {-battery_power}W - can increase EVSE"
+                    )
+                elif battery_power <= self.target_discharge_max:
+                    # In target range - small adjustments
+                    available = self.target_discharge_max - battery_power
+                    self.logger.info(
+                        f"Battery at {battery_power}W - in target range"
+                    )
+                else:
+                    # Discharging too much - need to decrease EVSE
+                    available = self.target_discharge_max - battery_power  # Will be negative
+                    self.logger.info(
+                        f"Battery discharging {battery_power}W - need to decrease EVSE"
+                    )
+                return available
 
 
 class PowerManager:
@@ -253,25 +237,96 @@ class PowerManager:
         self.last_available_power = None
         self.last_change_time = None
         
+        # Sensor delay compensation
+        self.sensor_delay_seconds = config['control'].get('sensor_delay_seconds', 60)
+        self.predictive_enabled = config['control'].get('predictive_model_enabled', True)
+        self.predictive_margin = config['control'].get('predictive_safety_margin', 0.15)
+        self.commanded_current = 0  # Last current we commanded to charger
+        self.command_time = None
+        
+        if self.predictive_enabled:
+            self.logger.info(f"Predictive compensation enabled: {self.sensor_delay_seconds}s delay, {self.predictive_margin*100:.0f}% safety margin")
+        
         self.logger.info(f"Hysteresis: {self.hysteresis}W")
     
-    def get_available_power(self) -> Optional[float]:
-        """Get current available power with smoothing."""
-        power = self.calculator.update()
+    def set_commanded_current(self, amps: float):
+        """
+        Update the commanded current for predictive compensation.
+        Call this whenever you change the charger current setting.
         
-        if power is not None:
-            # Check for rapid changes that need immediate response
+        Args:
+            amps: Current commanded to charger
+        """
+        self.commanded_current = amps
+        self.command_time = time.time()
+        self.logger.debug(f"Commanded current updated: {amps}A")
+    
+    def get_predicted_ev_load(self, voltage: float = 230) -> float:
+        """
+        Estimate actual EV load based on commanded current.
+        Accounts for sensor delay where sensors haven't caught up yet.
+        
+        Args:
+            voltage: Line voltage (default 230V)
+            
+        Returns:
+            Predicted actual EV power consumption (W)
+        """
+        if not self.predictive_enabled or self.command_time is None:
+            return 0
+        
+        # Check if we're still within the sensor delay window
+        time_since_command = time.time() - self.command_time
+        if time_since_command > self.sensor_delay_seconds:
+            # Sensors should have caught up by now
+            return 0
+        
+        # Predict actual power consumption
+        predicted_power = self.commanded_current * voltage
+        
+        # Apply safety margin (assume slightly higher consumption)
+        predicted_power *= (1.0 + self.predictive_margin)
+        
+        self.logger.debug(f"Predicted EV load: {predicted_power:.0f}W (commanded {self.commanded_current}A, {time_since_command:.0f}s ago)")
+        return predicted_power
+    
+    def get_available_power(self, voltage: float = 230, reported_ev_load: float = 0) -> Optional[float]:
+        """
+        Get current available power with smoothing and predictive compensation.
+        
+        Args:
+            voltage: Line voltage for EV load prediction
+            reported_ev_load: Current EV load from sensors (W)
+            
+        Returns:
+            Available power in watts, compensated for sensor delay
+        """
+        raw_power = self.calculator.update()
+        
+        if raw_power is not None:
+            # Check for rapid changes in RAW power before compensation
+            # This detects actual load changes (like kettle turning on)
             if self.last_available_power is not None:
-                delta = power - self.last_available_power
+                delta = raw_power - self.last_available_power
                 
                 # Large drop in available power (e.g., kettle turned on)
                 if delta < -1000:
                     self.logger.warning(f"Rapid power drop detected: {delta}W")
-                    # Return raw power for immediate response
-                    self.last_available_power = power
-                    return power
+                    # Skip compensation and return raw power for immediate response
+                    self.last_available_power = raw_power
+                    return raw_power
             
-            self.last_available_power = power
+            # Apply predictive compensation
+            power = raw_power
+            predicted_ev = self.get_predicted_ev_load(voltage)
+            if predicted_ev > 0:
+                # Calculate the underreported amount (difference between actual and reported)
+                underreported = predicted_ev - reported_ev_load
+                # Subtract only the underreported amount from available power
+                power = raw_power - underreported
+                self.logger.debug(f"Power compensation: {raw_power:.0f}W - ({predicted_ev:.0f}W predicted - {reported_ev_load:.0f}W reported) = {power:.0f}W")
+            
+            self.last_available_power = raw_power  # Track raw power for delta detection
         
         return power
     
@@ -299,7 +354,7 @@ class PowerManager:
         
         # Apply hysteresis - only adjust if change is significant
         if abs(power_diff) < self.hysteresis:
-            self.logger.debug(f"Power diff {power_diff}W within hysteresis {self.hysteresis}W")
+            self.logger.info(f"Power diff {power_diff:.1f}W within hysteresis {self.hysteresis}W (available={available_power:.1f}W, current={current_watts:.1f}W)")
             return None
         
         # Calculate target power

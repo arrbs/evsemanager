@@ -72,35 +72,39 @@ class SimulationRunner:
             self.power_sim.zero_export = self.scenario_config['zero_export']
             if self.power_sim.zero_export:
                 self.logger.info("Zero export mode enabled - no grid export allowed")
+        
+        # Get sensor delay from config (default 60 seconds)
+        sensor_delay = self.scenario_config.get('sensor_delay_seconds', 60)
+        if sensor_delay > 0:
+            self.logger.info(f"Sensor delay: {sensor_delay}s (simulates HA sensor response time)")
             
-        self.charger_sim = ChargerSimulator(voltage=config['charger']['default_voltage'])
+        self.charger_sim = ChargerSimulator(
+            voltage=config['charger']['default_voltage'],
+            sensor_delay=sensor_delay
+        )
         
         # Connect car if specified
         car_connect_at = self.scenario_config.get('car_connect_at', 0)
         if car_connect_at == 0:
             self.charger_sim.connect_car(self.scenario_config['car_initial_soc'])
             
-        # Create EVSE manager components
-        self.charger_controller = ChargerController(
-            ha_api=self.ha_api,
-            config=config['charger']
-        )
+        # Disable step delay for simulation (since we're using simulated time, not real time)
+        # In production, step_delay prevents charger faults from rapid adjustments
+        # In simulation, time advances instantly so we need this to be 0
+        config['charger']['step_delay'] = 0
+        self.logger.info("Step delay disabled for simulation (using simulated time)")
         
-        self.power_manager = PowerManager(
-            ha_api=self.ha_api,
-            config=config
-        )
-        
-        # Create temp directory for session data
-        os.makedirs('/tmp/evse_sim', exist_ok=True)
-        self.session_manager = SessionManager(data_dir='/tmp/evse_sim')
+        # Create the actual production EVSE Manager
+        # The simulation provides the environment, EVSEManager makes all decisions
+        from app.main import EVSEManager
+        import tempfile
+        self.temp_dir = tempfile.mkdtemp()
+        self.evse_manager = EVSEManager(self.ha_api, config, data_dir=self.temp_dir)
         
         # Simulation state
         self.time = 0  # Simulation time in seconds
-        self.dt = 5  # Time step in seconds
+        self.dt = 10  # Time step in seconds (increased for faster simulation)
         self.history: List[Dict] = []
-        self.is_charging = False
-        self.current_session_id = None
         
     def update_sensors(self, state: Dict[str, Any]):
         """Update mock sensor values."""
@@ -153,57 +157,40 @@ class SimulationRunner:
         # Update mock sensors
         self.update_sensors(power_state)
         
-        # Update charger simulator
-        actual_ev_load = self.charger_sim.update(self.dt)
+        # Update charger simulator first (physics)
+        # Returns reported (delayed) power, actual power affects car SoC
+        reported_ev_load = self.charger_sim.update(self.dt)
         
-            # Run EVSE manager logic (if car connected)
+        # Run the production EVSE Manager
+        # It reads sensors from mock HA API and makes decisions via service calls
+        # The EVSEManager doesn't know it's in a simulation - it just sees sensors and controls
         if self.charger_sim.car_connected:
-            # Calculate available power
-            available_power = self.power_manager.get_available_power()
+            # Run one update cycle of the production code
+            # This handles all the control logic: should_start_charging, handle_auto_mode, etc.
+            self.evse_manager.update()
             
-            # Calculate minimum charge power
-            min_current = min(self.config['charger']['allowed_currents'])
-            min_charge_power = min_current * self.config['charger']['default_voltage']
+            # Apply charger control from mock HA API to charger simulator
+            # EVSEManager called ha_api.call_service() which updated mock state
+            # Now we need to apply those commands to the physical charger simulator
+            charger_switch = self.config['charger']['switch_entity']
+            charger_current = self.config['charger']['current_entity']
             
-            # Determine if should be charging
-            if not self.is_charging:
-                # Check if should start
-                if available_power >= min_charge_power:
-                    target_current = self.charger_controller.watts_to_amps(available_power)
-                    if target_current >= min(self.config['charger']['allowed_currents']):
-                        self.logger.info(
-                            f"[{self.time}s] Starting charge: {available_power:.0f}W available "
-                            f"-> {target_current:.1f}A"
-                        )
-                        self.charger_sim.turn_on()
-                        self.charger_sim.set_current(target_current)
-                        self.is_charging = True
-                        self.current_session_id = self.session_manager.start_session()
-            else:
-                # Already charging - adjust power
-                target_current = self.charger_controller.watts_to_amps(available_power)
+            switch_state = self.ha_api.get_state(charger_switch)
+            if switch_state == 'on' and not self.charger_sim.is_on:
+                self.charger_sim.turn_on()
+            elif switch_state == 'off' and self.charger_sim.is_on:
+                self.charger_sim.turn_off()
                 
-                # Check if should stop
-                if target_current < min(self.config['charger']['allowed_currents']):
-                    # Would implement grace period here in full version
-                    self.logger.info(
-                        f"[{self.time}s] Stopping charge: insufficient power "
-                        f"({available_power:.0f}W)"
-                    )
-                    self.charger_sim.turn_off()
-                    self.is_charging = False
-                    if self.current_session_id:
-                        self.session_manager.end_session(self.current_session_id)
-                        self.current_session_id = None
-                else:
-                    # Adjust current - find nearest allowed current
-                    nearest_current = min(self.config['charger']['allowed_currents'], 
-                                        key=lambda x: abs(x - target_current))
-                    self.charger_sim.set_current(nearest_current)
+            current_value = self.ha_api.get_state(charger_current)
+            if current_value is not None:
+                self.charger_sim.set_current(float(current_value))
                     
         # Advance time
         self.power_sim.advance_time(self.dt)
         self.time += self.dt
+        
+        # Get delay info for tracking overshoot
+        delay_info = self.charger_sim.get_delay_info()
         
         # Record history
         history_entry = {
@@ -214,15 +201,18 @@ class SimulationRunner:
             'battery_power': power_state['battery_power'],
             'battery_soc': power_state['battery_soc'],
             'grid_power': power_state['grid_power'],
-            'ev_load': actual_ev_load,
-            'charger_current': self.charger_sim.actual_current,
+            'ev_load': reported_ev_load,  # What sensors report (delayed)
+            'ev_load_actual': self.charger_sim.get_actual_power(),  # Real power consumption
+            'charger_current': self.charger_sim.reported_current,  # What sensors report
+            'charger_current_actual': self.charger_sim.actual_current,  # Real current
             'charger_target': self.charger_sim.current,
             'charger_on': self.charger_sim.is_on,
             'car_soc': self.charger_sim.car_soc,
-            'available_power': self.power_manager.get_available_power() if self.charger_sim.car_connected else 0,
+            'available_power': self.evse_manager.power_manager.get_available_power() if self.charger_sim.car_connected else 0,
             'load_spikes': power_state.get('load_spikes', 0),
             'inverter_limited': power_state.get('inverter_limited', False),
             'active_events': power_state.get('active_events', []),
+            'sensor_delay_progress': delay_info['delay_progress'],
         }
         self.history.append(history_entry)
         
@@ -281,7 +271,7 @@ class SimulationRunner:
     def analyze_results(self) -> Dict[str, Any]:
         """Analyze simulation results."""
         # Calculate metrics
-        total_ev_energy = sum(h['ev_load'] * self.dt / 3600 for h in self.history)  # kWh
+        total_ev_energy = sum(h['ev_load'] * self.dt / 3600000 for h in self.history)  # kWh (W*s / 3600000)
         total_grid_import = sum(max(0, h['grid_power']) * self.dt / 3600 for h in self.history)
         total_grid_export = sum(max(0, -h['grid_power']) * self.dt / 3600 for h in self.history)
         
@@ -374,6 +364,9 @@ def load_config() -> Dict[str, Any]:
             'min_session_duration': 600,
             'power_smoothing_window': 60,
             'hysteresis_watts': 500,
+            'sensor_delay_seconds': 60,
+            'predictive_model_enabled': False,  # Test without predictive compensation
+            'predictive_safety_margin': 0.15,
         },
     }
 

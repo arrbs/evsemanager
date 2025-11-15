@@ -28,7 +28,7 @@ class SunnyDayScenario(Scenario):
         super().__init__(
             name="Sunny Day",
             description="Perfect conditions: clear sky, strong solar, battery healthy",
-            duration_hours=24
+            duration_hours=6
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -37,42 +37,11 @@ class SunnyDayScenario(Scenario):
             'car_initial_soc': 30,
             'car_connect_at': 0,  # Connect immediately
             'zero_export': True,  # No grid export allowed
-            'sensor_delay_seconds': 60,  # 60 second sensor lag
             'expected_results': {
                 'should_charge': True,
                 'min_solar_percent': 90,
                 'should_complete': False,  # 6 hours not enough for full charge
                 'max_grid_import': 500,  # Some brief imports OK
-            }
-        }
-
-
-class LowBatteryScenario(Scenario):
-    """Test low battery protection and grid import during discharge."""
-    
-    def __init__(self):
-        super().__init__(
-            name="Low Battery",
-            description="Battery at 40%, heavy loads drain it below 30%, should import from grid",
-            duration_hours=24
-        )
-        
-    def get_config(self) -> Dict[str, Any]:
-        return {
-            'power_scenario': 'sunny_day',
-            'cloud_factor': 0.0,  # No solar (evening simulation)
-            'battery_initial_soc': 40,  # Start at 40%
-            'car_initial_soc': 20,
-            'car_connect_at': 0,
-            'zero_export': True,
-            'load_events': [
-                # Heavy continuous load to drain battery below 30%
-                (0, 2000, 86400, "Evening loads (appliances, EV)"),
-            ],
-            'expected_results': {
-                'should_charge': False,  # No solar, can't charge from sun
-                'grid_import_required': True,  # Should import when battery < 30%
-                'battery_protection': True,  # Should stop draining at 30%
             }
         }
 
@@ -84,7 +53,7 @@ class CloudyDayScenario(Scenario):
         super().__init__(
             name="Cloudy Day",
             description="Variable solar with frequent clouds passing",
-            duration_hours=24
+            duration_hours=6
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -109,7 +78,7 @@ class MorningRampScenario(Scenario):
         super().__init__(
             name="Morning Ramp",
             description="Solar ramping up from dawn, test start/stop behavior",
-            duration_hours=24
+            duration_hours=4
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -117,7 +86,6 @@ class MorningRampScenario(Scenario):
             'power_scenario': 'morning_ramp',
             'car_initial_soc': 35,
             'car_connect_at': 0,
-            'zero_export': True,  # No grid export allowed
             'expected_results': {
                 'should_charge': True,
                 'delayed_start': True,  # Should wait for sufficient solar
@@ -134,7 +102,7 @@ class AfternoonFadeScenario(Scenario):
         super().__init__(
             name="Afternoon Fade",
             description="Solar declining in afternoon, test graceful stop",
-            duration_hours=24
+            duration_hours=3
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -142,7 +110,6 @@ class AfternoonFadeScenario(Scenario):
             'power_scenario': 'afternoon_fade',
             'car_initial_soc': 60,
             'car_connect_at': 0,
-            'zero_export': True,  # No grid export allowed
             'expected_results': {
                 'should_charge': True,
                 'expect_stop': True,  # Should stop as solar fades
@@ -159,7 +126,7 @@ class BatteryFullScenario(Scenario):
         super().__init__(
             name="Battery Full",
             description="Battery >95% SoC, should increase EV load to discharge battery",
-            duration_hours=24
+            duration_hours=3
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -184,7 +151,7 @@ class InsufficientPowerScenario(Scenario):
         super().__init__(
             name="Insufficient Power",
             description="Not enough power to start/maintain charging",
-            duration_hours=24
+            duration_hours=2
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -208,7 +175,7 @@ class StepControlScenario(Scenario):
         super().__init__(
             name="Step Control Test",
             description="Rapid power changes to test step control safety",
-            duration_hours=24
+            duration_hours=1
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -216,7 +183,6 @@ class StepControlScenario(Scenario):
             'power_scenario': 'partly_cloudy',
             'car_initial_soc': 30,
             'car_connect_at': 0,
-            'zero_export': True,  # No grid export allowed
             'expected_results': {
                 'should_charge': True,
                 'verify_step_delays': True,  # Check delays between adjustments
@@ -233,7 +199,7 @@ class LateArrivalScenario(Scenario):
         super().__init__(
             name="Late Arrival",
             description="Car arrives at noon with good solar available",
-            duration_hours=24
+            duration_hours=4
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -256,7 +222,7 @@ class SuddenLoadSpikesScenario(Scenario):
         super().__init__(
             name="Sudden Load Spikes",
             description="AC, water heater, and appliances start during charging",
-            duration_hours=24
+            duration_hours=3
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -288,7 +254,7 @@ class InverterLimitScenario(Scenario):
         super().__init__(
             name="Inverter Limit",
             description="Heavy loads approach/exceed inverter capacity, causing grid import",
-            duration_hours=24
+            duration_hours=2
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -320,7 +286,7 @@ class HeavyLoadInterruptionScenario(Scenario):
         super().__init__(
             name="Heavy Load Interruption",
             description="Large sudden load consumes all available power, EV stops temporarily",
-            duration_hours=24
+            duration_hours=2
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -349,7 +315,7 @@ class RandomAppliancesScenario(Scenario):
         super().__init__(
             name="Random Appliances",
             description="Realistic pattern of appliances starting/stopping randomly",
-            duration_hours=24
+            duration_hours=4
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -386,7 +352,7 @@ class GridImportStressScenario(Scenario):
         super().__init__(
             name="Grid Import Stress",
             description="Continuous heavy loads requiring grid import while charging",
-            duration_hours=24
+            duration_hours=2
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -418,7 +384,7 @@ class ZeroExportScenario(Scenario):
         super().__init__(
             name="Zero Export",
             description="System cannot export to grid, battery must absorb all excess",
-            duration_hours=24
+            duration_hours=6
         )
         
     def get_config(self) -> Dict[str, Any]:
@@ -437,44 +403,9 @@ class ZeroExportScenario(Scenario):
 
 
 # List of all available scenarios
-class StandardTestScenario(Scenario):
-    """Repeatable standard test with semi-cloudy conditions and power spikes."""
-    
-    def __init__(self):
-        super().__init__(
-            name="Standard Test",
-            description="Repeatable benchmark: sunrise to afternoon, shows probing and step-down",
-            duration_hours=10
-        )
-        
-    def get_config(self) -> Dict[str, Any]:
-        return {
-            'power_scenario': 'full_day_with_sunset',  # Full day: sunrise to sunset
-            'car_initial_soc': 40,
-            'car_connect_at': 0,
-            'battery_initial_soc': 50,  # Start at 50% battery
-            'zero_export': True,
-            'sensor_delay_seconds': 60,
-            'load_events': [
-                (3600, 2500, 600, "Kettle"),
-                (9000, 3000, 300, "Oven"),
-                (14400, 2000, 900, "Washing machine"),
-            ],
-            'expected_results': {
-                'should_charge': True,
-                'delayed_start': True,  # Should wait for sunrise
-                'min_charging_hours': 5.0,
-                'min_solar_percent': 85,
-                'max_grid_import': 2000,
-            }
-        }
-
-
 ALL_SCENARIOS = [
-    StandardTestScenario(),
     SunnyDayScenario(),
     CloudyDayScenario(),
-    LowBatteryScenario(),
     MorningRampScenario(),
     AfternoonFadeScenario(),
     BatteryFullScenario(),

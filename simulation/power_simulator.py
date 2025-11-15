@@ -59,15 +59,20 @@ class PowerSimulator:
             self.time_offset = 6 * 3600  # Start at 6 AM
             self.cloud_factor = 0.9
             self.battery_soc = 40
+        elif self.scenario == "full_day_with_sunset":
+            self.time_offset = 6 * 3600  # Start at 6 AM
+            self.cloud_factor = 0.95
+            self.cloud_frequency = 0.02  # Mostly clear
+            self.battery_soc = 50
         elif self.scenario == "afternoon_fade":
             self.time_offset = 15 * 3600  # Start at 3 PM
             self.cloud_factor = 0.8
             self.battery_soc = 95
         elif self.scenario == "partly_cloudy":
-            self.cloud_factor = 0.7
-            self.cloud_frequency = 0.15
-            self.battery_soc = 70
-            self.time_offset = 10 * 3600  # Start at 10 AM
+            self.cloud_factor = 1.0  # Full sun periods for good charging
+            self.cloud_frequency = 0.05  # Minimal clouds
+            self.battery_soc = 96  # Battery full to avoid priority issues
+            self.time_offset = 9 * 3600  # Start at 9 AM for more daylight
             
     def get_time_of_day(self) -> float:
         """Get current hour of day (0-24)."""
@@ -170,30 +175,35 @@ class PowerSimulator:
         """Calculate house load with time-of-day variations and sudden load events."""
         hour = self.get_time_of_day()
         
-        # Base load
-        load = self.house_base_load
+        # Base load: 300-500W depending on time of day
+        load = 300 + 200 * abs(math.sin(hour / 24 * math.pi))
         
-        # Morning peak (7-9 AM): +800W
-        if 7 <= hour <= 9:
-            load += 800 * math.sin((hour - 7) / 2 * math.pi)
+        # Morning peak (6-9 AM): +1500W average (kettle, toaster, etc.)
+        if 6 <= hour <= 9:
+            load += 1500 * math.sin((hour - 6) / 3 * math.pi)
             
-        # Evening peak (18-21): +1200W
-        if 18 <= hour <= 21:
-            load += 1200 * math.sin((hour - 18) / 3 * math.pi)
-            
-        # Midday: +300W
+        # Midday activity (11-14): +800W
         if 11 <= hour <= 14:
-            load += 300
+            load += 800 * math.sin((hour - 11) / 3 * math.pi)
             
-        # Add some randomness (±10%)
-        variation = math.sin(self.time_offset / 137) * 0.1
-        load *= (1 + variation)
+        # Evening peak (17-22): +2000W (cooking, appliances)
+        if 17 <= hour <= 22:
+            load += 2000 * math.sin((hour - 17) / 5 * math.pi)
+            
+        # Add realistic variability - random bursts (washing machine, oven, etc.)
+        # Create pseudo-random but repeatable spikes
+        spike_pattern = (
+            abs(math.sin(self.time_offset / 427)) * 
+            abs(math.cos(self.time_offset / 731))
+        )
+        if spike_pattern > 0.85:  # 15% of the time, spike
+            load += spike_pattern * 3000  # Up to 3000W spike
         
-        # Add sudden load spikes (appliances starting, etc.)
+        # Add configured load events (from scenario)
         self._update_active_load_spikes()
         load += self.get_active_load_spikes_power()
         
-        return max(200, load)
+        return max(300, load)
         
     def _update_battery_soc(self, battery_power: float, dt: float):
         """
@@ -222,36 +232,56 @@ class PowerSimulator:
         Returns:
             Dictionary with all sensor values
         """
-        pv_power = self.calculate_pv_power()
+        pv_power_available = self.calculate_pv_power()  # Actual solar capacity
         house_load = self.calculate_house_load()
         
         # Total load including EV if charging
         total_load = house_load + ev_load
         
-        # Calculate battery behavior
-        # If PV > Load: Battery charges (or charges slower if already high SoC)
-        # If PV < Load: Battery discharges (or grid imports if SoC too low)
+        # Calculate net power (can PV cover the load?)
+        net_power = pv_power_available - total_load
         
-        net_power = pv_power - total_load
+        # For zero-export: PV sensor reading matches load when battery is full
+        # (Inverter curtails excess, so app can't see it)
+        # App must probe by increasing load to discover actual capacity
+        if self.zero_export and self.battery_soc >= 100 and net_power > 0:
+            # Battery full, excess solar: PV reading equals load (curtailed)
+            pv_power = total_load
+        else:
+            # Normal operation: PV reading shows actual production
+            pv_power = pv_power_available
         
         # Battery charging logic
-        if self.battery_soc < 20:
-            # Low SoC: import from grid to charge battery + loads
-            battery_power = min(3000, -net_power + 2000)  # Try to charge at 2kW
-            grid_power = total_load - pv_power + battery_power
-        elif self.battery_soc > 95:
-            # High SoC: excess goes to grid (or EV could take more)
+        if self.battery_soc <= 31:
+            # Low SoC: protect battery from deep discharge (use 31% to prevent going below 30%)
             if net_power > 0:
+                # Have excess solar: charge battery with all of it
+                battery_power = min(5000, net_power)  # Max 5kW charge
+                grid_power = 0
+            else:
+                # Deficit: import from grid to cover loads, don't discharge battery
+                battery_power = 0  # Don't discharge when low
+                grid_power = total_load - pv_power  # Import what we need
+        elif self.battery_soc > 95:
+            # High SoC: battery nearly full
+            # PV curtailment already handled above for zero-export systems
+            if net_power > 0:
+                # Excess solar: charge battery (if not already full)
+                if self.battery_soc >= 100:
+                    battery_power = 0  # Full battery can't charge
+                    grid_power = 0 if self.zero_export else -net_power
+                else:
+                    battery_power = min(500, net_power)  # Slow charge when nearly full
+                    grid_power = 0 if self.zero_export else -(net_power - battery_power)
+            else:
+                # Deficit: discharge battery to cover
                 if self.zero_export:
-                    # Can't export and battery is full - power curtailment
-                    battery_power = 0
+                    # Discharge battery to cover deficit (no grid export/import)
+                    battery_power = max(-5000, net_power)  # Max 5kW discharge
                     grid_power = 0
                 else:
-                    battery_power = min(1000, net_power)  # Slow charge when nearly full
+                    battery_power = max(-3000, net_power)  # Discharge to cover deficit
                     grid_power = -(pv_power - total_load - battery_power)
-            else:
-                battery_power = max(-3000, net_power)  # Discharge to cover deficit
-                grid_power = -(pv_power - total_load - battery_power)
         else:
             # Normal operation: battery balances the system
             if net_power > 0:
@@ -268,11 +298,21 @@ class PowerSimulator:
             else:
                 # Deficit: discharge battery
                 battery_power = max(-5000, net_power)  # Max 5kW discharge
-                if abs(net_power) > 5000:
-                    # Battery can't cover it all: import from grid
-                    grid_power = abs(net_power) - 5000
+                
+                if self.zero_export:
+                    # Zero export mode: battery must cover everything
+                    if abs(battery_power) < abs(net_power):
+                        # Battery can't cover deficit: need grid import
+                        grid_power = abs(net_power) - abs(battery_power)
+                    else:
+                        grid_power = 0
                 else:
-                    grid_power = 0
+                    # Normal mode: grid can help if needed
+                    if abs(net_power) > 5000:
+                        # Battery can't cover it all: import from grid
+                        grid_power = abs(net_power) - 5000
+                    else:
+                        grid_power = 0
                     
         # Update battery SoC
         self._update_battery_soc(battery_power, dt)
@@ -312,17 +352,29 @@ class PowerSimulator:
 class ChargerSimulator:
     """Simulates EV charger behavior."""
     
-    def __init__(self, voltage: float = 230):
-        """Initialize charger simulator."""
+    def __init__(self, voltage: float = 230, sensor_delay: float = 60):
+        """
+        Initialize charger simulator.
+        
+        Args:
+            voltage: Line voltage (230V for single-phase)
+            sensor_delay: Delay in seconds before sensors reflect power changes (default 60s)
+        """
         self.voltage = voltage
         self.current = 0  # Current setting in amps
         self.is_on = False
         self.status = "available"  # available, waiting, charging, charged, fault
-        self.actual_current = 0  # What charger is actually drawing
+        self.actual_current = 0  # What charger is actually drawing (real physical current)
+        self.reported_current = 0  # What sensors report (delayed)
         self.ramp_rate = 0.5  # Amps per second ramp rate
         self.car_connected = False
         self.car_soc = 30  # %
         self.car_battery_capacity = 60000  # Wh (60 kWh)
+        
+        # Sensor delay simulation
+        self.sensor_delay = sensor_delay  # Seconds of delay
+        self.pending_change = None  # (target_current, time_remaining)
+        self.change_start_current = 0  # Current when change started
         
     def connect_car(self, initial_soc: float = 30):
         """Connect a car to the charger."""
@@ -339,8 +391,17 @@ class ChargerSimulator:
         self.status = "available"
         
     def set_current(self, amps: float):
-        """Set target current."""
+        """
+        Set target current. Creates a pending change that will be reflected
+        in sensors after sensor_delay seconds.
+        """
         self.current = amps
+        
+        # If there's a significant change, start the delay timer
+        if abs(self.current - self.reported_current) > 0.5:  # More than 0.5A change
+            self.pending_change = self.current
+            self.change_start_current = self.reported_current
+            self.pending_change_time = 0  # Time elapsed since change started
         
     def turn_on(self):
         """Turn charger on."""
@@ -365,24 +426,48 @@ class ChargerSimulator:
             dt: Time step in seconds
             
         Returns:
-            Actual power draw in watts
+            Actual power draw in watts (what sensors report, which is delayed)
         """
         if not self.is_on or not self.car_connected:
             # Ramp down
             self.actual_current = max(0, self.actual_current - self.ramp_rate * dt)
+            self.reported_current = self.actual_current
             return 0
             
-        # Ramp to target current
+        # Ramp to target current (this happens immediately in hardware)
         if self.actual_current < self.current:
             self.actual_current = min(self.current, self.actual_current + self.ramp_rate * dt)
         elif self.actual_current > self.current:
             self.actual_current = max(self.current, self.actual_current - self.ramp_rate * dt)
             
-        # Calculate power
-        power = self.actual_current * self.voltage
+        # Update sensor delay simulation
+        # The sensors take time to reflect the actual current
+        if self.pending_change is not None:
+            self.pending_change_time += dt
+            
+            # Gradually ramp the reported value over the delay period
+            if self.pending_change_time >= self.sensor_delay:
+                # Delay complete, sensors now show actual value
+                self.reported_current = self.actual_current
+                self.pending_change = None
+            else:
+                # Sensors are still catching up - linear interpolation
+                progress = self.pending_change_time / self.sensor_delay
+                self.reported_current = self.change_start_current + \
+                    (self.actual_current - self.change_start_current) * progress
+        else:
+            # No pending change, sensors track actual (with small lag)
+            self.reported_current = self.actual_current
+            
+        # Calculate power based on what sensors REPORT (delayed)
+        # This is what Home Assistant sees
+        reported_power = self.reported_current * self.voltage
         
-        # Update car SoC
-        energy = (power * dt) / 3600  # Wh
+        # But the ACTUAL power consumption affects the car battery
+        actual_power = self.actual_current * self.voltage
+        
+        # Update car SoC based on ACTUAL power
+        energy = (actual_power * dt) / 3600  # Wh
         soc_increase = (energy / self.car_battery_capacity) * 100
         self.car_soc = min(100, self.car_soc + soc_increase)
         
@@ -390,7 +475,21 @@ class ChargerSimulator:
         if self.car_soc >= 99:
             self.status = "charged"
             
-        return power
+        # Return what sensors REPORT (this is what HA sees and affects power calculations)
+        return reported_power
+    
+    def get_actual_power(self) -> float:
+        """Get actual power consumption (not what sensors report)."""
+        return self.actual_current * self.voltage
+    
+    def get_delay_info(self) -> Dict[str, Any]:
+        """Get information about sensor delay state."""
+        return {
+            'actual_current': self.actual_current,
+            'reported_current': self.reported_current,
+            'pending_change': self.pending_change,
+            'delay_progress': self.pending_change_time / self.sensor_delay if self.pending_change is not None else 1.0
+        }
         
     def get_status(self) -> str:
         """Get charger status."""

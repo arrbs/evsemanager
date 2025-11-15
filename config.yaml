@@ -28,6 +28,7 @@ options:
     current_entity: "number.ev_charger_set_current"
     status_entity: "sensor.ev_charger_status"
     allowed_currents: [6, 8, 10, 13, 16, 20, 24]
+    max_current: 24
     step_delay: 10
     voltage_entity: "sensor.ss_inverter_voltage"
     default_voltage: 230
@@ -66,6 +67,12 @@ options:
     min_session_duration: 600     # Minimum session time (seconds)
     power_smoothing_window: 60    # Smoothing window for power readings (seconds)
     hysteresis_watts: 500         # Minimum power change to trigger adjustment
+    
+    # Sensor delay compensation
+  # The grace_period setting handles sensor delay naturally - no predictive model needed
+  sensor_delay_seconds: 60
+  predictive_model_enabled: false
+  predictive_safety_margin: 0.15
   
   # Adaptive Learning
   adaptive:
@@ -117,6 +124,9 @@ schema:
     min_session_duration: int(60,3600)
     power_smoothing_window: int(10,300)
     hysteresis_watts: int(100,5000)
+    sensor_delay_seconds: int(0,300)?
+    predictive_model_enabled: bool?
+    predictive_safety_margin: float?
   
   adaptive:
     enabled: bool
