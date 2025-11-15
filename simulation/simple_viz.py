@@ -17,6 +17,133 @@ def draw_bar(value: float, max_value: float, width: int = 50, char: str = '█')
     return char * bar_length
 
 
+def draw_timeline_graph(data: List[float], height: int = 10, width: int = 80, label: str = "", 
+                       center_zero: bool = False) -> List[str]:
+    """
+    Draw an ASCII timeline graph.
+    
+    Args:
+        data: List of values to plot
+        height: Height of the graph in characters
+        width: Width of the graph in characters
+        label: Label for the Y-axis
+        center_zero: If True, put zero line in the middle for +/- values
+        
+    Returns:
+        List of strings representing each line of the graph
+    """
+    if not data or len(data) == 0:
+        return [f"{label}: No data"]
+    
+    # Normalize data to fit in width
+    step = max(1, len(data) // width)
+    sampled = [data[i] for i in range(0, len(data), step)]
+    if len(sampled) > width:
+        sampled = sampled[:width]
+    
+    # Get min/max for scaling
+    min_val = min(sampled)
+    max_val = max(sampled)
+    
+    if max_val == min_val:
+        max_val = min_val + 1
+    
+    # Decide if we need centered zero line
+    if center_zero or (min_val < 0 and max_val > 0):
+        # Values cross zero - center it
+        abs_max = max(abs(min_val), abs(max_val))
+        max_val = abs_max
+        min_val = -abs_max
+    
+    # Create graph lines
+    lines = []
+    
+    # Top line with max value
+    lines.append(f"{label:>12} {max_val:>6.0f} ┤" + "─" * len(sampled))
+    
+    # Graph lines
+    zero_row = None
+    for row in range(height - 2):
+        threshold = max_val - (row + 1) * (max_val - min_val) / (height - 1)
+        
+        # Mark where zero line is
+        if min_val < 0 and threshold <= 0 and zero_row is None:
+            zero_row = row
+        
+        line = f"{' ':>12} {threshold:>6.0f} │"
+        
+        for val in sampled:
+            if threshold >= 0:
+                # Above zero - fill if value is above threshold
+                if val >= threshold:
+                    line += "█"
+                else:
+                    line += "·" if val >= 0 else " "
+            else:
+                # Below zero - fill if value is below threshold (more negative)
+                if val <= threshold:
+                    line += "▓"
+                else:
+                    line += "·" if val < 0 else " "
+        
+        lines.append(line)
+    
+    # Bottom line with min value
+    bottom = f"{' ':>12} {min_val:>6.0f} └" + "─" * len(sampled)
+    lines.append(bottom)
+    
+    return lines
+
+
+def draw_discrete_timeline(data: List[float], height: int = 8, width: int = 80, label: str = "", 
+                          levels: List[float] = None) -> List[str]:
+    """
+    Draw a discrete/stepped timeline (for charger current selection).
+    
+    Args:
+        data: List of values to plot
+        height: Height of the graph
+        width: Width of the graph
+        label: Label for the axis
+        levels: Discrete levels to show (e.g., allowed currents)
+        
+    Returns:
+        List of strings representing the graph
+    """
+    if not data or len(data) == 0:
+        return [f"{label}: No data"]
+    
+    # Sample data to fit width
+    step = max(1, len(data) // width)
+    sampled = [data[i] for i in range(0, len(data), step)]
+    if len(sampled) > width:
+        sampled = sampled[:width]
+    
+    max_val = max(sampled) if sampled else 0
+    
+    lines = []
+    lines.append(f"{label:>12} {max_val:>6.1f} ┤" + "─" * len(sampled))
+    
+    for row in range(height - 2):
+        threshold = max_val * (1 - (row + 1) / (height - 1))
+        line = f"{' ':>12} {threshold:>6.1f} │"
+        
+        for val in sampled:
+            if val > 0 and val >= threshold:
+                line += "▓"
+            elif val > 0:
+                line += "░"
+            else:
+                line += " "
+        
+        lines.append(line)
+    
+    bottom = f"{' ':>12} {0:>6.1f} └" + "─" * len(sampled)
+    lines.append(bottom)
+    
+    return lines
+
+
 def visualize_scenario(results_file: str):
     """Visualize simulation results from JSON file."""
     
@@ -100,22 +227,84 @@ def visualize_scenario(results_file: str):
     
     print()
     
-    # Charging behavior
+    # Timeline graphs
     if history:
-        print("CHARGING PATTERN:")
+        print("=" * 100)
+        print("TIMELINE VISUALIZATION")
+        print("=" * 100)
+        print()
         
-        # Sample every N points to keep it readable
-        sample_every = max(1, len(history) // 100)
+        # Extract data series
+        pv_power = [s['pv_power'] for s in history]
+        house_load = [s['house_load'] for s in history]
+        ev_load = [s['ev_load'] for s in history]
+        battery_power = [s['battery_power'] for s in history]
+        battery_soc = [s['battery_soc'] for s in history]
+        car_soc = [s['car_soc'] for s in history]
+        charger_current = [s['charger_current'] for s in history]
+        grid_power = [s['grid_power'] for s in history]
         
-        for i in range(0, len(history), sample_every):
-            sample = history[i]
-            hour = sample['time'] / 3600
-            current = sample['charger_current']
-            soc = sample['car_soc']
-            
-            if current > 0:
-                bar = draw_bar(current, 24, 30, '█')
-                print(f"  {hour:5.1f}h: [{bar:<30}] {current:4.1f}A  SoC: {soc:4.1f}%")
+        # Calculate total load
+        total_load = [h + e for h, e in zip(house_load, ev_load)]
+        
+        # Time axis
+        duration_hours = summary['duration_hours']
+        width = 80
+        time_labels = "            " + " " * 7 + "└"
+        step = max(1, int(duration_hours / 8))  # Show ~8 time markers
+        for i in range(0, int(duration_hours) + 1, step):
+            pos = int((i / duration_hours) * width)
+            time_labels += " " * (pos - len(time_labels) + 20) + f"{i}h"
+        
+        # 1. Solar Production
+        print("SOLAR PRODUCTION (W)")
+        for line in draw_timeline_graph(pv_power, height=8, width=width, label="PV Power"):
+            print(line)
+        print(time_labels)
+        print()
+        
+        # 2. Loads (House + EV)
+        print("POWER CONSUMPTION (W)")
+        for line in draw_timeline_graph(total_load, height=8, width=width, label="Total Load"):
+            print(line)
+        print()
+        for line in draw_timeline_graph(house_load, height=6, width=width, label="House Load"):
+            print(line)
+        print()
+        for line in draw_timeline_graph(ev_load, height=6, width=width, label="EV Load"):
+            print(line)
+        print(time_labels)
+        print()
+        
+        # 3. Battery
+        print("BATTERY STATUS")
+        for line in draw_timeline_graph(battery_soc, height=8, width=width, label="Batt SoC (%)"):
+            print(line)
+        print()
+        
+        # Show battery power flow (positive = discharging, negative = charging)
+        print("BATTERY POWER FLOW (W, positive=discharge, negative=charge)")
+        for line in draw_timeline_graph(battery_power, height=8, width=width, label="Batt Power", center_zero=True):
+            print(line)
+        print(time_labels)
+        print()
+        
+        # 4. EV Charging
+        print("EV CHARGING STATUS")
+        for line in draw_timeline_graph(car_soc, height=8, width=width, label="Car SoC (%)"):
+            print(line)
+        print()
+        for line in draw_discrete_timeline(charger_current, height=8, width=width, label="Charge (A)"):
+            print(line)
+        print(time_labels)
+        print()
+        
+        # 5. Grid Power
+        print("GRID POWER (W, negative=export, positive=import)")
+        for line in draw_timeline_graph(grid_power, height=8, width=width, label="Grid", center_zero=True):
+            print(line)
+        print(time_labels)
+        print()
 
 
 def main():

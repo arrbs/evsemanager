@@ -106,8 +106,13 @@ class BatteryCalculator(PowerCalculator):
         self.target_discharge_min = config['sensors'].get('battery_target_discharge_min', 0)
         self.target_discharge_max = config['sensors'].get('battery_target_discharge_max', 1500)
         
+        # Optional: use grid export sensor as fallback when battery is full
+        self.grid_power_entity = config['sensors'].get('grid_power_entity')
+        
         self.logger.info(f"Using battery method: SOC={self.battery_soc_entity}, Power={self.battery_power_entity}")
         self.logger.info(f"High SOC threshold: {self.high_soc}%, Priority: {self.priority_soc}%")
+        if self.grid_power_entity:
+            self.logger.info(f"Grid sensor available for enhanced detection: {self.grid_power_entity}")
     
     def calculate_available_power(self) -> Optional[float]:
         """
@@ -156,6 +161,23 @@ class BatteryCalculator(PowerCalculator):
                 # Still charging - we have lots of excess
                 # All charging power is excess, plus we want to shift to mild discharge
                 available = -battery_power + self.target_discharge_max
+                
+                # Enhancement: If battery is nearly full and we have grid export sensor,
+                # also add grid export to available power (it's being wasted)
+                if soc >= 99 and self.grid_power_entity:
+                    grid_power = self.ha_api.get_state(self.grid_power_entity)
+                    if grid_power is not None:
+                        grid_power = float(grid_power)
+                        # Negative grid power = export (wasted power we could use)
+                        if grid_power < 0:
+                            export_power = -grid_power
+                            available += export_power
+                            self.logger.debug(
+                                f"Battery full ({soc}%), charging {-battery_power}W + "
+                                f"grid export {export_power}W = {available}W available"
+                            )
+                            return available
+                
                 self.logger.debug(f"Battery charging at {-battery_power}W (SOC {soc}% high) - targeting discharge")
                 return available
             
@@ -163,6 +185,21 @@ class BatteryCalculator(PowerCalculator):
                 # Not discharging enough - we have excess available
                 # We want to increase car load to push battery into target discharge range
                 available = self.target_discharge_max - battery_power
+                
+                # Enhancement: Also check for grid export when battery nearly full
+                if soc >= 99 and self.grid_power_entity:
+                    grid_power = self.ha_api.get_state(self.grid_power_entity)
+                    if grid_power is not None:
+                        grid_power = float(grid_power)
+                        if grid_power < 0:
+                            export_power = -grid_power
+                            available += export_power
+                            self.logger.debug(
+                                f"Battery full ({soc}%), low discharge + "
+                                f"grid export {export_power}W = {available}W available"
+                            )
+                            return available
+                
                 self.logger.debug(f"Battery discharge {battery_power}W too low - available: {available}W")
                 return available
             
