@@ -259,11 +259,16 @@ class PowerSimulator:
         # Update battery SoC
         self.update_battery_soc(battery_power, dt)
         
-        # Inverter power is PV going to AC side
-        inverter_power = pv_power
-        
+        # Inverter power calculation:
+        # - When battery discharging: inverter_power = PV + battery discharge
+        # - When battery charging: inverter_power = PV only (battery charging doesn't flow through inverter to AC side)
+        if battery_power < 0:  # Discharging (negative = discharge)
+            inverter_power = pv_power + abs(battery_power)
+        else:  # Charging or idle
+            inverter_power = pv_power
+            
         # Check if we're hitting inverter limits
-        inverter_limited = pv_power >= self.inverter_max_power
+        inverter_limited = inverter_power >= self.inverter_max_power
         
         return {
             'pv_power': round(pv_power, 1),
