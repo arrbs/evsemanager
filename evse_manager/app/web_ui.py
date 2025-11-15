@@ -71,6 +71,27 @@ HTML_TEMPLATE = """
         }
         .mode-chip.auto { background: linear-gradient(135deg, #4caf50, #2e7d32); color: white; }
         .mode-chip.manual { background: #e0e0e0; color: #424242; }
+        .state-chip {
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: none;
+            background: #eef2ff;
+            color: #3f51b5;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+            display: none;
+        }
+        .state-chip.charging { background: #e6f4ea; color: #1b5e20; }
+        .state-chip.waiting_for_solar { background: #fff6e0; color: #d48806; }
+        .state-chip.waiting_for_battery { background: #f3e5f5; color: #6a1b9a; }
+        .state-chip.manual_priority { background: #ffe0e0; color: #c62828; }
+        .state-chip.waiting_for_vehicle { background: #e0f2ff; color: #0277bd; }
+        .state-chip.blocked_charger { background: #fdecea; color: #c62828; }
+        .state-chip.vehicle_full { background: #ede7f6; color: #4527a0; }
+        .state-chip.ready { background: #e8f5e9; color: #2e7d32; }
+        .state-chip.idle { background: #f5f5f5; color: #666; }
+        .state-chip.inverter_limit { background: #fdecea; color: #c62828; }
         
         .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
         .card {
@@ -185,19 +206,21 @@ HTML_TEMPLATE = """
             color: #333;
         }
         .flag-control {
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: space-between;
-            padding: 12px 16px;
+            gap: 12px;
+            padding: 8px 14px;
             border: 1px solid #eee;
-            border-radius: 10px;
+            border-radius: 999px;
             background: #f8f8f8;
-            min-width: 260px;
-            flex: 1 1 260px;
+            min-width: auto;
+            flex: 0 0 auto;
         }
-        .flag-stack { display: flex; flex-direction: column; gap: 12px; width: 100%; }
+        .flag-text { display: flex; flex-direction: column; }
+        .flag-stack { display: flex; flex-direction: row; gap: 12px; width: auto; align-items: center; flex: 0 0 auto; }
         .flag-title { font-size: 14px; font-weight: 600; color: #333; }
-        .flag-subtitle { font-size: 12px; color: #777; margin-top: 4px; }
+        .flag-subtitle { font-size: 11px; color: #777; margin-top: 2px; max-width: 220px; }
         .switch-toggle { position: relative; display: inline-block; width: 48px; height: 26px; }
         .switch-toggle input { display: none; }
         .switch-toggle .slider {
@@ -259,6 +282,7 @@ HTML_TEMPLATE = """
             </div>
             <div class="header-meta">
                 <span class="mode-chip manual" id="mode-chip">MODE</span>
+                <span class="state-chip" id="auto-state-chip"></span>
                 <span class="status-badge" id="status-badge">Loading...</span>
             </div>
         </div>
@@ -440,7 +464,7 @@ HTML_TEMPLATE = """
                 <button class="btn-danger" onclick="stopCharging()">Stop Charging</button>
                 <div class="flag-stack">
                     <div class="flag-control">
-                        <div>
+                        <div class="flag-text">
                             <div class="flag-title">Battery Priority</div>
                             <div class="flag-subtitle" id="battery-priority-note">Pause EV charging to refill the house battery.</div>
                         </div>
@@ -579,6 +603,19 @@ HTML_TEMPLATE = """
             if (manualSelect && data.manual_current) {
                 manualSelect.value = String(data.manual_current);
             }
+            const autoChip = document.getElementById('auto-state-chip');
+            if (autoChip) {
+                if (data.mode === 'auto' && data.auto_state_label) {
+                    autoChip.style.display = 'inline-flex';
+                    autoChip.textContent = data.auto_state_label;
+                    autoChip.className = `state-chip ${data.auto_state || ''}`;
+                    autoChip.title = data.auto_state_help || '';
+                } else {
+                    autoChip.style.display = 'none';
+                    autoChip.textContent = '';
+                    autoChip.title = '';
+                }
+            }
             batteryPriorityOverride = !!data.battery_priority_override;
             const priorityToggle = document.getElementById('battery-priority-toggle');
             if (priorityToggle) {
@@ -602,6 +639,8 @@ HTML_TEMPLATE = """
                     noteText = 'Battery priority is holding charging until SOC recovers.';
                 } else if (data.auto_pause_reason === 'battery_priority_override') {
                     noteText = 'You turned on battery priority, so EV charging will stay paused.';
+                } else if (data.auto_pause_reason === 'inverter_limit') {
+                    noteText = 'Auto paused because the inverter is at its limit, so the charger turned off immediately.';
                 } else if (data.auto_pause_reason === 'car_unplugged') {
                     noteText = 'EV idle because the charger reports no car connected.';
                 } else if (data.auto_pause_reason === 'charger_refused') {
@@ -612,6 +651,8 @@ HTML_TEMPLATE = """
                     noteText = 'Stopping charger… waiting for hardware to acknowledge.';
                 } else if (data.charger_transition === 'starting') {
                     noteText = 'Starting charger… waiting for hardware to ramp up.';
+                } else if (data.mode === 'auto' && data.auto_state_help && data.auto_state !== 'charging') {
+                    noteText = data.auto_state_help;
                 }
                 statusNote.textContent = noteText;
                 statusNote.style.display = noteText ? 'block' : 'none';

@@ -86,6 +86,7 @@ class EVSEManager:
         self.last_failed_start_time = None
         self.startup_handshake_deadline = None
         self.switch_reapply_attempted = False
+        self.inverter_limit_active_since = None
         
         self.logger.info("="*60)
         self.logger.info("EVSE Manager initialized successfully")
@@ -271,6 +272,14 @@ class EVSEManager:
     def handle_auto_mode(self):
         """Handle automatic mode charging logic."""
         status = self.charger.get_status()
+        current_amps = self.charger.get_current()
+
+        if current_amps is None:
+            self.logger.error("Cannot read current setting")
+            return
+
+        if self._handle_inverter_limit_response(current_amps):
+            return
         
         # Check if we should stop due to insufficient power
         if self.power_manager.should_stop_charging(self.charger):
@@ -292,12 +301,6 @@ class EVSEManager:
             if self.insufficient_power_since is not None:
                 self.logger.info("Power sufficient again - grace period reset")
                 self.insufficient_power_since = None
-        
-        # Get current charging current
-        current_amps = self.charger.get_current()
-        if current_amps is None:
-            self.logger.error("Cannot read current setting")
-            return
         
         # Calculate target current based on available power
         target_amps = self.power_manager.get_target_current(self.charger, current_amps)
@@ -328,6 +331,9 @@ class EVSEManager:
         current_amps = self.charger.get_current()
         
         if current_amps is None:
+            return
+
+        if self._handle_inverter_limit_response(current_amps):
             return
         
         # Adjust to manual target if different
@@ -360,6 +366,63 @@ class EVSEManager:
         if self.session_manager and self.session_manager.session_start_time:
             return (datetime.now() - self.session_manager.session_start_time).total_seconds()
         return 0.0
+
+    def _get_active_failed_reason(self) -> Optional[str]:
+        """Return recent failed-start reason if still relevant."""
+        if not self.failed_start_reason or not self.last_failed_start_time:
+            return None
+        ttl = max(self.start_retry_cooldown, 300)
+        elapsed = (datetime.now() - self.last_failed_start_time).total_seconds()
+        if elapsed > ttl:
+            self.failed_start_reason = None
+            return None
+        return self.failed_start_reason
+
+    def _force_minimum_current(self) -> bool:
+        """Force the charger down to its minimum current as quickly as possible."""
+        target = self.charger.allowed_currents[0]
+        max_steps = len(self.charger.allowed_currents)
+        success = False
+        for _ in range(max_steps):
+            current = self.charger.get_current()
+            if current is None:
+                break
+            if int(round(current)) <= target:
+                success = True
+                break
+            if not self.charger.set_current_step(target, force=True):
+                break
+            time.sleep(0.4)
+        if success:
+            self.power_manager.set_commanded_current(target)
+            self.session_manager.record_adjustment()
+            self.last_adjustment_time = datetime.now()
+        return success
+
+    def _handle_inverter_limit_response(self, current_amps: Optional[float]) -> bool:
+        """React immediately when the inverter limit is reached."""
+        if not self.power_manager.check_inverter_limit():
+            self.inverter_limit_active_since = None
+            return False
+
+        min_current = self.charger.allowed_currents[0]
+        if current_amps is None:
+            current_amps = self.charger.get_current() or min_current
+
+        if current_amps - min_current > 0.5:
+            self.logger.warning("Inverter limit hit - forcing rapid current reduction")
+            if not self._force_minimum_current():
+                self.logger.error("Unable to reduce current while inverter limit active - stopping charger")
+                self.stop_charging("inverter_limit")
+            else:
+                self.logger.info("Current forced to minimum to protect inverter")
+            self.inverter_limit_active_since = datetime.now()
+            return True
+
+        self.logger.error("Inverter limit persists at minimum current - stopping immediately")
+        self.inverter_limit_active_since = datetime.now()
+        self.stop_charging("inverter_limit")
+        return True
     
     def _apply_learned_settings(self):
         """Apply learned optimal settings."""
@@ -555,6 +618,8 @@ class EVSEManager:
                 self.logger.debug(f"Unable to capture battery telemetry: {exc}")
                 battery_info = None
 
+        active_failed_reason = self._get_active_failed_reason()
+
         limiting_factors = []
         if battery_priority_active:
             if self.battery_priority_override:
@@ -570,9 +635,9 @@ class EVSEManager:
         car_unplugged = current_status == ChargerStatus.AVAILABLE and not self.session_active
         if car_unplugged:
             limiting_factors.append('car_unplugged')
-        if self.failed_start_reason == 'charger_refused':
+        if active_failed_reason == 'charger_refused':
             limiting_factors.append('charger_refused')
-        elif self.failed_start_reason == 'vehicle_charged':
+        elif active_failed_reason == 'vehicle_charged':
             limiting_factors.append('vehicle_charged')
 
         auto_pause_reason = None
@@ -581,16 +646,84 @@ class EVSEManager:
                 auto_pause_reason = 'battery_priority_override' if self.battery_priority_override else 'battery_priority'
             elif insufficient_power:
                 auto_pause_reason = 'insufficient_power'
+            elif inverter_limiting:
+                auto_pause_reason = 'inverter_limit'
             elif car_unplugged:
                 auto_pause_reason = 'car_unplugged'
-        if not self.session_active and auto_pause_reason is None and self.failed_start_reason:
-            auto_pause_reason = self.failed_start_reason
+        if not self.session_active and auto_pause_reason is None and active_failed_reason:
+            auto_pause_reason = active_failed_reason
 
         charger_transition = None
         if self.session_active and not charger_on:
             charger_transition = 'starting'
         elif not self.session_active and charger_on:
             charger_transition = 'stopping'
+
+        auto_state = None
+        auto_state_label = None
+        auto_state_help = None
+        if self.mode == 'auto':
+            if self.session_active:
+                auto_state = 'charging'
+                auto_state_label = 'Charging'
+                auto_state_help = 'Actively charging using available solar power.'
+            else:
+                reason_map = {
+                    'insufficient_power': (
+                        'waiting_for_solar',
+                        'Waiting for solar',
+                        'Auto mode will resume once there is enough excess solar power.'
+                    ),
+                    'battery_priority': (
+                        'waiting_for_battery',
+                        'Holding for battery',
+                        'Battery priority is delaying EV charging until the house battery recovers.'
+                    ),
+                    'battery_priority_override': (
+                        'manual_priority',
+                        'Battery priority (manual)',
+                        'You enabled manual battery priority, so auto mode is paused.'
+                    ),
+                    'inverter_limit': (
+                        'inverter_limit',
+                        'Inverter limit',
+                        'The inverter is maxed out, so auto mode paused charging immediately.'
+                    ),
+                    'car_unplugged': (
+                        'waiting_for_vehicle',
+                        'Waiting for vehicle',
+                        'Plug a vehicle in to let auto mode start charging.'
+                    ),
+                    'charger_refused': (
+                        'blocked_charger',
+                        'Charger refused',
+                        'The charger rejected the ON command—toggle its hardware switch to clear the fault.'
+                    ),
+                    'vehicle_charged': (
+                        'vehicle_full',
+                        'Vehicle full',
+                        'The vehicle reports a full battery; auto mode will stay idle.'
+                    )
+                }
+                if auto_pause_reason in reason_map:
+                    auto_state, auto_state_label, auto_state_help = reason_map[auto_pause_reason]
+                else:
+                    if current_status == ChargerStatus.WAITING:
+                        auto_state = 'ready'
+                        auto_state_label = 'Ready'
+                        auto_state_help = 'Car connected and ready—auto mode will start when solar permits.'
+                    elif current_status == ChargerStatus.AVAILABLE:
+                        auto_state = 'waiting_for_vehicle'
+                        auto_state_label = 'Waiting for vehicle'
+                        auto_state_help = 'Plug a vehicle in to allow charging.'
+                    elif current_status == ChargerStatus.CHARGED:
+                        auto_state = 'vehicle_full'
+                        auto_state_label = 'Vehicle full'
+                        auto_state_help = 'The vehicle ended the session; auto mode is idle.'
+                    else:
+                        auto_state = 'idle'
+                        auto_state_label = 'Idle'
+                        auto_state_help = 'Auto mode is standing by.'
 
         # Prepare state dict
         state = {
@@ -607,6 +740,9 @@ class EVSEManager:
             'battery': battery_info,
             'limiting_factors': limiting_factors,
             'auto_pause_reason': auto_pause_reason,
+            'auto_state': auto_state,
+            'auto_state_label': auto_state_label,
+            'auto_state_help': auto_state_help,
             'charger_transition': charger_transition,
             'grace_period': grace_status,
             'battery_priority_override': self.battery_priority_override,
@@ -663,7 +799,10 @@ class EVSEManager:
                 
                 elif cmd_type == 'start':
                     self.logger.info("UI command: Start charging")
-                    if self.should_start_charging(ignore_cooldown=True):
+                    manual_force = self.mode == 'manual' and not self.session_active
+                    if manual_force or self.should_start_charging(ignore_cooldown=True):
+                        if manual_force:
+                            self.logger.info("Manual mode start request bypassing solar checks")
                         if not self.start_charging(manual_request=True):
                             self.logger.warning("Manual start command failed - check vehicle state")
                     else:
