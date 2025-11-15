@@ -226,6 +226,20 @@ class ChargerController:
             self.current_current = next_step
         
         return success
+
+    def set_current_direct(self, target_amps: float) -> bool:
+        """Directly set current to target without stepping (safe when charger idle)."""
+        target = self._find_nearest_allowed_current(target_amps)
+        self.logger.info(f"Force setting current to {target}A (direct)")
+        success = self.ha_api.call_service(
+            "number", "set_value",
+            entity_id=self.current_entity,
+            value=target
+        )
+        if success:
+            self.current_current = target
+            self.last_adjustment_time = time.time()
+        return success
     
     def set_current_smooth(self, target_amps: float, timeout: float = 300) -> bool:
         """

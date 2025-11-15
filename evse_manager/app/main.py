@@ -385,6 +385,14 @@ class EVSEManager:
         target = self.charger.allowed_currents[0]
         max_steps = len(self.charger.allowed_currents)
         success = False
+        status = self.charger.get_status()
+        if status in (ChargerStatus.AVAILABLE, ChargerStatus.CHARGED):
+            self.logger.debug("Charger idle - performing direct current reset")
+            success = self.charger.set_current_direct(target)
+            if success:
+                self.session_manager.record_adjustment()
+                self.last_adjustment_time = datetime.now()
+            return success
         for _ in range(max_steps):
             current = self.charger.get_current()
             if current is None:
@@ -805,9 +813,16 @@ class EVSEManager:
                 
                 elif cmd_type == 'set_manual_current':
                     current = command.get('current')
-                    if current:
-                        self.logger.info(f"UI command: Set manual current to {current}A")
-                        self.manual_current = current
+                    if current is not None:
+                        current_value = int(current)
+                        self.logger.info(f"UI command: Set manual current to {current_value}A")
+                        self.manual_current = current_value
+                        if self.mode == 'manual':
+                            applied = self.charger.set_current_step(self.manual_current, force=True)
+                            if applied:
+                                self.logger.info("Manual current applied immediately while charger idle")
+                            else:
+                                self.logger.debug("Manual current command queued; charger will adjust on next cycle")
                 
                 elif cmd_type == 'start':
                     self.logger.info("UI command: Start charging")
@@ -899,9 +914,9 @@ class EVSEManager:
                         if status == ChargerStatus.CHARGED and session_duration < min_duration_before_full:
                             self._record_failed_start('vehicle_charged')
                         if status == ChargerStatus.AVAILABLE:
-                            min_current = self.charger.allowed_currents[0]
-                            self.logger.info("Vehicle unplugged - resetting charger current to minimum")
-                            self.charger.set_current_step(min_current, force=True)
+                            self.logger.info("Vehicle unplugged - forcing charger to minimum current")
+                            if not self._force_minimum_current():
+                                self.logger.warning("Failed to force minimum current after unplug event")
                         self.stop_charging(reason)
                     return
 
