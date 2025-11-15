@@ -11,11 +11,11 @@ import threading
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 
-from app.charger_controller import ChargerController, ChargerStatus
-from app.power_calculator import PowerManager
-from app.session_manager import SessionManager, AdaptiveTuner
+from charger_controller import ChargerController, ChargerStatus
+from power_calculator import PowerManager
+from session_manager import SessionManager, AdaptiveTuner
 try:
-    from app.ha_api import HomeAssistantAPI, EntityPublisher
+    from ha_api import HomeAssistantAPI, EntityPublisher
 except ImportError:
     # In simulation environment, these will be provided as mock objects
     HomeAssistantAPI = None

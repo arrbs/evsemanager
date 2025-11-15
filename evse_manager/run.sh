@@ -25,4 +25,4 @@ sleep 2
 
 # Run the main application
 bashio::log.info "Starting EVSE Manager daemon..."
-python3 /app/main.py
+cd /app && python3 main.py
