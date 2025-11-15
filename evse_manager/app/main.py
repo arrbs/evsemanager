@@ -898,6 +898,10 @@ class EVSEManager:
                         min_duration_before_full = max(120, handshake_buffer)
                         if status == ChargerStatus.CHARGED and session_duration < min_duration_before_full:
                             self._record_failed_start('vehicle_charged')
+                        if status == ChargerStatus.AVAILABLE:
+                            min_current = self.charger.allowed_currents[0]
+                            self.logger.info("Vehicle unplugged - resetting charger current to minimum")
+                            self.charger.set_current_step(min_current, force=True)
                         self.stop_charging(reason)
                     return
 
