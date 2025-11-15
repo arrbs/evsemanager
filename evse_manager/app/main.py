@@ -901,6 +901,15 @@ class EVSEManager:
                         self.stop_charging(reason)
                     return
 
+                if status == ChargerStatus.WAITING:
+                    if handshake_active:
+                        self.logger.debug("Vehicle waiting during handshake window; giving it more time")
+                    else:
+                        self.logger.warning("Charger stuck in waiting state - stopping session so user can replug")
+                        self._record_failed_start('vehicle_waiting')
+                        self.stop_charging("vehicle_waiting")
+                    return
+
                 if status == ChargerStatus.FAULT:
                     self.stop_charging("fault")
                     return

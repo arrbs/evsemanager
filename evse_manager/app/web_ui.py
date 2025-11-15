@@ -172,8 +172,17 @@ HTML_TEMPLATE = """
         .session-stats { color: #666; margin-top: 4px; }
         
         .loading { text-align: center; padding: 40px; color: #999; }
-        .error { background: #ffebee; color: #c62828; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
-        .success { background: #e8f5e9; color: #2e7d32; padding: 15px; border-radius: 6px; margin-bottom: 20px; }
+        .toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 999;
+            min-width: 220px;
+            max-width: 320px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+        .error { background: #ffebee; color: #c62828; padding: 15px; border-radius: 8px; }
+        .success { background: #e8f5e9; color: #2e7d32; padding: 15px; border-radius: 8px; }
         @keyframes pulse {
             0%, 100% { box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
             50% { box-shadow: 0 4px 20px rgba(255,152,0,0.4); }
@@ -288,8 +297,8 @@ HTML_TEMPLATE = """
             </div>
         </div>
         
-        <div id="error-message" class="error" style="display: none;"></div>
-        <div id="success-message" class="success" style="display: none;"></div>
+        <div id="error-message" class="error toast" style="display: none;"></div>
+        <div id="success-message" class="success toast" style="display: none;"></div>
 
         <div id="intention-panel" class="card" style="display: none; background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%); color: white; margin-bottom: 20px; animation: pulse 2s ease-in-out infinite;">
             <h2 style="color: white; display: flex; align-items: center; gap: 10px;">
@@ -528,6 +537,52 @@ HTML_TEMPLATE = """
         let currentMode = null;
         let batteryPriorityOverride = false;
 
+        function applyModeVisualState(mode) {
+            if (!mode) {
+                return;
+            }
+            currentMode = mode;
+            document.body.classList.toggle('mode-auto', mode === 'auto');
+            document.body.classList.toggle('mode-manual', mode !== 'auto');
+            const modeChip = document.getElementById('mode-chip');
+            if (modeChip) {
+                modeChip.textContent = mode === 'auto' ? 'Auto' : 'Manual';
+                modeChip.classList.toggle('auto', mode === 'auto');
+                modeChip.classList.toggle('manual', mode !== 'auto');
+            }
+            const manualButton = document.getElementById('mode-manual-btn');
+            const autoButton = document.getElementById('mode-auto-btn');
+            if (manualButton && autoButton) {
+                manualButton.classList.toggle('active', mode !== 'auto');
+                autoButton.classList.toggle('active', mode === 'auto');
+            }
+        }
+
+        function setModeButtonsDisabled(disabled) {
+            document.querySelectorAll('.pill-toggle button').forEach(btn => { btn.disabled = disabled; });
+        }
+
+        function applyBatteryPriorityState(enabled) {
+            batteryPriorityOverride = !!enabled;
+            const priorityToggle = document.getElementById('battery-priority-toggle');
+            if (priorityToggle) {
+                priorityToggle.checked = batteryPriorityOverride;
+            }
+            const priorityNote = document.getElementById('battery-priority-note');
+            if (priorityNote) {
+                priorityNote.textContent = batteryPriorityOverride
+                    ? 'Manual battery priority is holding EV charging.'
+                    : 'Pause EV charging to refill the house battery.';
+            }
+        }
+
+        function setBatteryToggleDisabled(disabled) {
+            const toggle = document.getElementById('battery-priority-toggle');
+            if (toggle) {
+                toggle.disabled = disabled;
+            }
+        }
+
         function formatDuration(seconds) {
             if (!seconds) return '-';
             const hours = Math.floor(seconds / 3600);
@@ -584,23 +639,7 @@ HTML_TEMPLATE = """
             
             // Current status
             document.getElementById('mode').textContent = data.mode || '-';
-            document.body.classList.toggle('mode-auto', data.mode === 'auto');
-            document.body.classList.toggle('mode-manual', data.mode === 'manual');
-            if (data.mode) {
-                currentMode = data.mode;
-            }
-            const modeChip = document.getElementById('mode-chip');
-            if (modeChip) {
-                modeChip.textContent = data.mode === 'auto' ? 'Auto' : 'Manual';
-                modeChip.classList.toggle('auto', data.mode === 'auto');
-                modeChip.classList.toggle('manual', data.mode !== 'auto');
-            }
-            const manualButton = document.getElementById('mode-manual-btn');
-            const autoButton = document.getElementById('mode-auto-btn');
-            if (manualButton && autoButton) {
-                manualButton.classList.toggle('active', data.mode !== 'auto');
-                autoButton.classList.toggle('active', data.mode === 'auto');
-            }
+            applyModeVisualState(data.mode);
             const manualSelect = document.getElementById('manual-current');
             if (manualSelect && data.manual_current) {
                 manualSelect.value = String(data.manual_current);
@@ -618,17 +657,7 @@ HTML_TEMPLATE = """
                     autoChip.title = '';
                 }
             }
-            batteryPriorityOverride = !!data.battery_priority_override;
-            const priorityToggle = document.getElementById('battery-priority-toggle');
-            if (priorityToggle) {
-                priorityToggle.checked = batteryPriorityOverride;
-            }
-            const priorityNote = document.getElementById('battery-priority-note');
-            if (priorityNote) {
-                priorityNote.textContent = batteryPriorityOverride
-                    ? 'Manual battery priority is holding EV charging.'
-                    : 'Pause EV charging to refill the house battery.';
-            }
+            applyBatteryPriorityState(data.battery_priority_override);
             document.getElementById('charger-status').textContent = data.charger_status || '-';
             document.getElementById('current-amps').textContent = data.current_amps?.toFixed(1) || '-';
             document.getElementById('charging-power').textContent = data.charging_power?.toFixed(0) || '-';
@@ -789,7 +818,8 @@ HTML_TEMPLATE = """
             if (currentMode && currentMode === mode) {
                 return;
             }
-            setControlsDisabled(true);
+            setModeButtonsDisabled(true);
+            applyModeVisualState(mode);
             try {
                 const response = await apiFetch('/api/mode', {
                     method: 'POST',
@@ -801,8 +831,9 @@ HTML_TEMPLATE = """
                 await fetchStatus();
             } catch (error) {
                 showError('Failed to set mode');
+                await fetchStatus();
             } finally {
-                setControlsDisabled(false);
+                setModeButtonsDisabled(false);
             }
         }
 
@@ -814,7 +845,8 @@ HTML_TEMPLATE = """
         }
 
         async function setBatteryPriority(enabled) {
-            setControlsDisabled(true);
+            setBatteryToggleDisabled(true);
+            applyBatteryPriorityState(enabled);
             try {
                 const response = await apiFetch('/api/battery_priority', {
                     method: 'POST',
@@ -827,10 +859,9 @@ HTML_TEMPLATE = """
             } catch (error) {
                 console.error('Error updating battery priority:', error);
                 showError('Failed to update battery priority');
-                const toggle = document.getElementById('battery-priority-toggle');
-                if (toggle) toggle.checked = batteryPriorityOverride;
+                await fetchStatus();
             } finally {
-                setControlsDisabled(false);
+                setBatteryToggleDisabled(false);
             }
         }
 
