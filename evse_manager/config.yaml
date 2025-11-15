@@ -1,5 +1,5 @@
 name: EVSE Manager
-version: "0.1.3"
+version: "0.1.4"
 slug: evse_manager
 description: Intelligent EVSE power management with solar optimization
 url: "https://github.com/arrbs/evsemanager"
@@ -17,7 +17,8 @@ ingress_port: 5000
 panel_icon: mdi:ev-station
 panel_title: EVSE Manager
 hassio_api: true
-hassio_role: default
+homeassistant_api: true
+hassio_role: homeassistant
 auth_api: true
 
 options:

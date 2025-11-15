@@ -15,19 +15,17 @@ class HomeAssistantAPI:
         self.logger = logging.getLogger(__name__)
         
         # Get supervisor token and URL
-        # Note: SUPERVISOR_TOKEN only works for supervisor API, not core API
-        # We need to access HA directly via local network
+        # Requires homeassistant_api: true in config.yaml
         self.token = os.getenv('SUPERVISOR_TOKEN')
         
         if self.token:
-            # Access Home Assistant directly on local network
-            # The add-on runs inside the HA network, so we can use homeassistant hostname
-            self.base_url = "http://homeassistant:8123"
+            # Access Home Assistant Core API via supervisor proxy
+            self.base_url = "http://supervisor/core"
             self.headers = {
                 'Authorization': f'Bearer {self.token}',
                 'Content-Type': 'application/json'
             }
-            self.logger.info(f"Running in Home Assistant add-on mode (via homeassistant:8123)")
+            self.logger.info("Running in Home Assistant add-on mode (supervisor proxy)")
         else:
             # Fallback for development
             self.base_url = os.getenv('HA_URL', 'http://homeassistant.local:8123')
