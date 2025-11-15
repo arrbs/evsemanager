@@ -370,6 +370,31 @@ class GridImportStressScenario(Scenario):
         }
 
 
+class ZeroExportScenario(Scenario):
+    """Scenario with zero export constraint (common for many solar systems)."""
+    
+    def __init__(self):
+        super().__init__(
+            name="Zero Export",
+            description="System cannot export to grid, battery must absorb all excess",
+            duration_hours=6
+        )
+        
+    def get_config(self) -> Dict[str, Any]:
+        return {
+            'power_scenario': 'sunny_day',
+            'car_initial_soc': 30,
+            'car_connect_at': 0,
+            'zero_export': True,  # Enable zero export mode
+            'expected_results': {
+                'should_charge': True,
+                'no_grid_export': True,
+                'max_grid_export': 0,
+                'min_solar_percent': 95,
+            }
+        }
+
+
 # List of all available scenarios
 ALL_SCENARIOS = [
     SunnyDayScenario(),
@@ -385,6 +410,7 @@ ALL_SCENARIOS = [
     HeavyLoadInterruptionScenario(),
     RandomAppliancesScenario(),
     GridImportStressScenario(),
+    ZeroExportScenario(),
 ]
 
 

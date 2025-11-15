@@ -66,6 +66,12 @@ class SimulationRunner:
                 start_time, power, duration, description = event
                 self.power_sim.add_load_event(start_time, power, duration, description)
                 self.logger.info(f"Scheduled load event: {description} at {start_time}s (+{power}W for {duration}s)")
+        
+        # Set zero export mode if specified
+        if 'zero_export' in self.scenario_config:
+            self.power_sim.zero_export = self.scenario_config['zero_export']
+            if self.power_sim.zero_export:
+                self.logger.info("Zero export mode enabled - no grid export allowed")
             
         self.charger_sim = ChargerSimulator(voltage=config['charger']['default_voltage'])
         
@@ -420,6 +426,13 @@ def main():
             results = sim.run()
             all_results.append(results)
             
+            # Save individual results if output specified
+            if args.output:
+                output_file = args.output.replace('.json', f'_{scenario.name.replace(" ", "_")}.json')
+                with open(output_file, 'w') as f:
+                    json.dump(results, f, indent=2)
+                print(f"Saved results to {output_file}")
+            
         # Summary
         print(f"\n{'='*60}")
         print("SUMMARY OF ALL SCENARIOS")
@@ -439,6 +452,13 @@ def main():
         # Run single scenario
         sim = SimulationRunner(args.scenario, config)
         results = sim.run()
+        
+        # Save results if output specified
+        if args.output:
+            with open(args.output, 'w') as f:
+                json.dump(results, f, indent=2)
+            print(f"\nResults saved to {args.output}")
+            print(f"Visualize with: python3 simple_viz.py {args.output}")
         
         if args.output:
             sim.save_results(args.output)

@@ -31,6 +31,7 @@ class PowerSimulator:
         self.battery_capacity = 10000  # Wh (10 kWh)
         self.battery_soc = 50  # %
         self.house_base_load = 500  # W baseline load
+        self.zero_export = False  # If True, no grid export allowed
         
         # Weather parameters (adjusted by scenario)
         self.cloud_factor = 1.0  # Multiplier for solar (1.0 = clear)
@@ -194,12 +195,13 @@ class PowerSimulator:
         
         return max(200, load)
         
-    def update_battery_soc(self, battery_power: float, dt: float):
+    def _update_battery_soc(self, battery_power: float, dt: float):
         """
-        Update battery state of charge.
+        Update battery SoC based on power flow.
         
         Args:
-            battery_power: Battery power (positive = charging, negative = discharging)
+            battery_power: Battery power internally (positive = charging, negative = discharging)
+                          Note: Output is inverted to match HA convention
             dt: Time step in seconds
         """
         # Energy change in Wh
@@ -240,16 +242,29 @@ class PowerSimulator:
         elif self.battery_soc > 95:
             # High SoC: excess goes to grid (or EV could take more)
             if net_power > 0:
-                battery_power = min(1000, net_power)  # Slow charge when nearly full
+                if self.zero_export:
+                    # Can't export and battery is full - power curtailment
+                    battery_power = 0
+                    grid_power = 0
+                else:
+                    battery_power = min(1000, net_power)  # Slow charge when nearly full
+                    grid_power = -(pv_power - total_load - battery_power)
             else:
                 battery_power = max(-3000, net_power)  # Discharge to cover deficit
-            grid_power = -(pv_power - total_load - battery_power)
+                grid_power = -(pv_power - total_load - battery_power)
         else:
             # Normal operation: battery balances the system
             if net_power > 0:
                 # Excess solar: charge battery
                 battery_power = min(5000, net_power)  # Max 5kW charge
-                grid_power = -(net_power - battery_power)  # Export remainder
+                
+                if self.zero_export:
+                    # Zero export mode: use battery to absorb all excess
+                    battery_power = net_power  # Charge battery with all excess
+                    grid_power = 0
+                else:
+                    # Normal mode: can export to grid
+                    grid_power = -(net_power - battery_power)  # Export remainder
             else:
                 # Deficit: discharge battery
                 battery_power = max(-5000, net_power)  # Max 5kW discharge
@@ -260,7 +275,7 @@ class PowerSimulator:
                     grid_power = 0
                     
         # Update battery SoC
-        self.update_battery_soc(battery_power, dt)
+        self._update_battery_soc(battery_power, dt)
         
         # Inverter power calculation:
         # - When battery discharging: inverter_power = PV + battery discharge
@@ -277,7 +292,7 @@ class PowerSimulator:
             'pv_power': round(pv_power, 1),
             'house_load': round(house_load, 1),
             'total_load': round(total_load, 1),
-            'battery_power': round(battery_power, 1),
+            'battery_power': round(-battery_power, 1),  # Flip sign: negative = charging, positive = discharging
             'battery_soc': round(self.battery_soc, 1),
             'grid_power': round(grid_power, 1),
             'inverter_power': round(inverter_power, 1),
