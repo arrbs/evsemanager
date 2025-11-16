@@ -406,35 +406,35 @@ class EVSEManager:
             self.last_adjustment_time = datetime.now()
         return success
 
+    def _record_energy_trace(
+        self,
+        available_power: Optional[float],
+        pv_power: Optional[float],
+        load_power: Optional[float],
+        grid_power: Optional[float],
+        current_watts: Optional[float],
+        target_watts: Optional[float]
+    ):
+        """Store recent power samples so the UI can render history."""
+        sample = {
+            'ts': datetime.utcnow().isoformat(),
+            'available': available_power,
+            'pv': pv_power,
+            'load': load_power,
+            'grid': grid_power,
+            'current': current_watts,
+            'target': target_watts
+        }
+        self.energy_history.append(sample)
+        max_samples = max(60, int(180 / max(1, self.update_interval)))
+        if len(self.energy_history) > max_samples:
+            self.energy_history = self.energy_history[-max_samples:]
+
     def _handle_inverter_limit_response(self, current_amps: Optional[float]) -> bool:
         """React immediately when the inverter limit is reached."""
         if not self.power_manager.check_inverter_limit():
             self.inverter_limit_active_since = None
             return False
-
-        def _record_energy_trace(
-            self,
-            available_power: Optional[float],
-            pv_power: Optional[float],
-            load_power: Optional[float],
-            grid_power: Optional[float],
-            current_watts: Optional[float],
-            target_watts: Optional[float]
-        ):
-            """Store recent energy samples for UI visualization."""
-            sample = {
-                'ts': datetime.utcnow().isoformat(),
-                'available': available_power,
-                'pv': pv_power,
-                'load': load_power,
-                'grid': grid_power,
-                'current': current_watts,
-                'target': target_watts
-            }
-            self.energy_history.append(sample)
-            max_samples = max(60, int(180 / max(1, self.update_interval)))
-            if len(self.energy_history) > max_samples:
-                self.energy_history = self.energy_history[-max_samples:]
 
         min_current = self.charger.allowed_currents[0]
         if current_amps is None:
