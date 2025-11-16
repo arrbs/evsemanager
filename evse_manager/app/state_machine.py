@@ -25,6 +25,7 @@ class ControllerConfig:
 
     line_voltage_v: float = 230.0
     soc_main_max: float = 95.0
+    soc_probe_min: float = 90.0
     soc_conservative_below: float = 94.0
     small_discharge_margin_w: float = 200.0
     conservative_charge_target_w: float = 100.0
@@ -252,7 +253,7 @@ class DeterministicStateMachine:
     def _region_for_soc(self, batt_soc: Optional[float]) -> str:
         if batt_soc is None:
             return "MAIN"
-        if batt_soc >= self.config.soc_main_max:
+        if batt_soc >= self.config.soc_probe_min:
             return "PROBE"
         return "MAIN"
 
