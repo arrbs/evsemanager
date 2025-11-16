@@ -328,48 +328,55 @@ class PowerManager:
         self.logger.debug(f"Predicted EV load: {predicted_power:.0f}W (commanded {self.commanded_current}A, {time_since_command:.0f}s ago)")
         return predicted_power
     
-    def get_available_power(self, voltage: float = 230, reported_ev_load: float = 0) -> Optional[float]:
+    def get_available_power(self, voltage: float = 230, current_ev_load: float = 0) -> Optional[float]:
         """
-        Get current available power with smoothing and predictive compensation.
+        Get current available power for EV charging.
+        
+        The key insight: if the EV is already drawing power, we need to add that back
+        to determine the TOTAL power budget available for the EV. For example:
+        - Battery charging at 1.7 kW (raw available)
+        - EV currently drawing 1.3 kW
+        - Total available for EV = 1.7 + 1.3 = 3.0 kW
+        
+        This prevents the system from thinking there's "insufficient power" when
+        the EV is already successfully charging.
         
         Args:
-            voltage: Line voltage for EV load prediction
-            reported_ev_load: Current EV load from sensors (W)
+            voltage: Line voltage for EV load prediction (unused now)
+            current_ev_load: Current EV power draw in watts
             
         Returns:
-            Available power in watts, compensated for sensor delay
+            Total available power budget for EV charging
         """
         raw_power = self.calculator.update()
         
         if raw_power is not None:
-            # Check for rapid changes in RAW power before compensation
-            # This detects actual load changes (like kettle turning on)
+            # Check for rapid changes indicating external load changes
             if self.last_available_power is not None:
                 delta = raw_power - self.last_available_power
                 
                 # Large drop in available power (e.g., kettle turned on)
                 if delta < -1000:
                     self.logger.warning(f"Rapid power drop detected: {delta}W")
-                    # Skip compensation and return raw power for immediate response
-                    self.last_available_power = raw_power
-                    return raw_power
             
-            # Apply predictive compensation
-            power = raw_power
-            predicted_ev = self.get_predicted_ev_load(voltage)
-            if predicted_ev > 0:
-                # Calculate the underreported amount (difference between actual and reported)
-                underreported = predicted_ev - reported_ev_load
-                # Subtract only the underreported amount from available power
-                power = raw_power - underreported
-                self.logger.debug(f"Power compensation: {raw_power:.0f}W - ({predicted_ev:.0f}W predicted - {reported_ev_load:.0f}W reported) = {power:.0f}W")
+            self.last_available_power = raw_power
             
-            self.last_available_power = raw_power  # Track raw power for delta detection
+            # Add current EV consumption to get total available budget
+            # If EV is drawing 1.3kW and battery is charging at 1.7kW,
+            # we actually have 3.0kW available for the EV
+            total_available = raw_power + current_ev_load
+            
+            if current_ev_load > 100:
+                self.logger.debug(
+                    f"Available power: {raw_power:.0f}W + {current_ev_load:.0f}W (current EV) = {total_available:.0f}W total budget"
+                )
+            else:
+                self.logger.debug(f"Available power: {raw_power:.0f}W (no current EV load)")
+            
+            return total_available
         else:
-            # If no raw power available (sensor error), return 0
-            power = 0.0
-        
-        return power
+            # If no raw power available (sensor error), return current consumption if any
+            return current_ev_load if current_ev_load > 0 else 0.0
     
     def get_target_current(self, charger_controller, current_amps: float) -> Optional[float]:
         """
@@ -382,13 +389,14 @@ class PowerManager:
         Returns:
             Target current in amps, or None if no change needed
         """
-        available_power = self.get_available_power()
+        # Convert current amps to watts
+        current_watts = charger_controller.amps_to_watts(current_amps)
+        
+        # Get available power considering current EV load
+        available_power = self.get_available_power(current_ev_load=current_watts)
         
         if available_power is None:
             return None
-        
-        # Convert current amps to watts
-        current_watts = charger_controller.amps_to_watts(current_amps)
         
         # Calculate power difference
         power_diff = available_power - current_watts
@@ -467,7 +475,10 @@ class PowerManager:
         Returns:
             True if charging should be stopped
         """
-        available = self.get_available_power()
+        # Get current EV load to calculate total available
+        current_amps = charger_controller.get_current() or 0
+        current_watts = charger_controller.amps_to_watts(current_amps)
+        available = self.get_available_power(current_ev_load=current_watts)
         
         if available is None:
             return False

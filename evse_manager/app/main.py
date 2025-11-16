@@ -250,7 +250,8 @@ class EVSEManager:
         
         # In auto mode, check if we have enough power
         if self.mode == 'auto':
-            available_power = self.power_manager.get_available_power()
+            # When checking if we can start, EV load is 0
+            available_power = self.power_manager.get_available_power(current_ev_load=0)
             min_power = self.charger.get_min_power()
             
             if available_power is None:
@@ -281,6 +282,7 @@ class EVSEManager:
             return
         
         # Check if we should stop due to insufficient power
+        # Pass current EV consumption so power manager can make accurate decision
         if self.power_manager.should_stop_charging(self.charger):
             if self.insufficient_power_since is None:
                 self.insufficient_power_since = datetime.now()
@@ -433,8 +435,12 @@ class EVSEManager:
     def _record_energy_trace_from_current_state(self):
         """Record energy trace using current system state."""
         try:
-            # Get current power readings
-            available_power = self.power_manager.get_available_power()
+            # Get current and target first to calculate EV load
+            current_amps = self.charger.get_current() or 0
+            current_ev_watts = self.charger.amps_to_watts(current_amps)
+            
+            # Get current power readings with EV load context
+            available_power = self.power_manager.get_available_power(current_ev_load=current_ev_watts)
             
             sensors = self.config.get('sensors', {})
             pv_entity = sensors.get('total_pv_entity')
@@ -454,8 +460,7 @@ class EVSEManager:
             total_load_power = _read_sensor(load_entity)
             grid_power = _read_sensor(grid_entity)
             
-            # Get current and target
-            current_amps = self.charger.get_current() or 0
+            # Get target
             target_current = self.power_manager.commanded_current or current_amps
             current_watts = self.charger.amps_to_watts(current_amps)
             target_watts = self.charger.amps_to_watts(target_current) if target_current else None
@@ -625,12 +630,16 @@ class EVSEManager:
         current_amps = self.charger.get_current() or 0
         target_current = self.power_manager.commanded_current or current_amps
         charging_power = self.charger.get_power() if self.session_active else 0
-        available_power = self.power_manager.get_available_power()
+        current_ev_watts = self.charger.amps_to_watts(current_amps)
+        available_power = self.power_manager.get_available_power(current_ev_load=current_ev_watts)
         min_power = self.charger.get_min_power()
         charger_on = self.charger.is_on()
         insufficient_power = False
         if self.mode == 'auto':
-            if available_power is None or available_power < min_power:
+            # Get available power considering current EV consumption
+            current_ev_watts = self.charger.amps_to_watts(current_amps)
+            available_power_for_check = self.power_manager.get_available_power(current_ev_load=current_ev_watts)
+            if available_power_for_check is None or available_power_for_check < min_power:
                 insufficient_power = True
 
         # Capture inverter telemetry for UI visibility
