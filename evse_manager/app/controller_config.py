@@ -106,6 +106,8 @@ def load_runtime_config(path: Path = Path("/data/options.json")) -> RuntimeConfi
         probe_max_discharge_w=float(_extract("probe_max_discharge_w", 1000)),
         probe_charge_margin_w=float(_extract("probe_charge_margin_w", 50)),
         probe_discharge_margin_w=float(_extract("probe_discharge_margin_w", 200)),
+        probe_step_interval_s=float(_extract("probe_step_interval_s", 30)),
+        min_active_amps=float(_extract("min_active_amps", 6)),
         inverter_limit_w=float(
             _extract(
                 "inverter_limit_w",

@@ -22,6 +22,8 @@ FALLBACK_PAYLOAD = {
     "battery_priority_soc": 95,
     "limiting_factors": [],
     "battery": {"soc": None, "power": None, "direction": "idle"},
+    "control_target_label": "SOC target 95% (band 94-96%)",
+    "control_reason_label": "Awaiting telemetry",
     "energy_map": {
         "history": [],
         "evse_steps": [],
@@ -415,6 +417,8 @@ HTML_TEMPLATE = """
                         <div class=\"metric\"><span>AVAILABLE</span><strong id=\"available-chip\">-- W</strong></div>
                         <div class=\"metric\"><span>PV ARRAY</span><strong id=\"pv-chip\">-- W</strong></div>
                         <div class=\"metric\"><span>INVERTER</span><strong id=\"load-chip\">-- W</strong></div>
+                    <p class="auto-help" id="control-target-label">Target: --</p>
+                    <p class="auto-help" id="control-reason-label">Reason: --</p>
                         <div class=\"metric\"><span>EV DRAW</span><strong id=\"ev-draw-chip\">-- W</strong></div>
                     </div>
                 </article>
@@ -592,6 +596,7 @@ HTML_TEMPLATE = """
             document.getElementById('auto-help').textContent = data.auto_state_help || 'No guidance available.';
             updateModeChips(data);
             updateStatusChips(data);
+            updateControlNarrative(data);
         }
 
         function updateModeChips(data) {
@@ -609,6 +614,19 @@ HTML_TEMPLATE = """
             }
             if (modeSubtext) {
                 modeSubtext.textContent = data.mode_state ? data.mode_state.replace(/_/g, ' ').toUpperCase() : 'DETERMINISTIC FSM';
+            }
+        }
+
+        function updateControlNarrative(data) {
+            const target = document.getElementById('control-target-label');
+            const reason = document.getElementById('control-reason-label');
+            if (target) {
+                const label = data.control_target_label || 'Target unavailable';
+                target.textContent = `Target: ${label}`;
+            }
+            if (reason) {
+                const why = data.control_reason_label || 'Awaiting telemetry';
+                reason.textContent = `Reason: ${why}`;
             }
         }
 

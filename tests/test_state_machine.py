@@ -11,8 +11,10 @@ if str(APP_DIR) not in sys.path:
 
 from state_machine import (  # noqa: E402  # pylint: disable=wrong-import-position
     ControllerConfig,
+    ControllerState,
     DeterministicStateMachine,
     Inputs,
+    ModeState,
 )
 
 
@@ -96,6 +98,68 @@ class DeterministicStateMachineTests(unittest.TestCase):
         self.assertIsNotNone(decision)
         self.assertEqual(decision.current_command_amps, 6)
         self.assertEqual(self.machine.state.evse_step_index, 1)
+
+    def test_probe_waits_min_interval_before_step_up(self) -> None:
+        """Probe mode honours the configured minimum interval between steps."""
+
+        config = ControllerConfig(probe_step_interval_s=40.0)
+        machine = DeterministicStateMachine(config)
+        machine.state = ControllerState(
+            mode_state=ModeState.PROBE_READY,
+            evse_step_index=1,
+            last_change_ts_s=100.0,
+        )
+
+        decision, _ = machine.tick(
+            make_inputs(
+                now_s=120.0,
+                pv_power_w=5000.0,
+                inverter_power_w=2000.0,
+                batt_power_w=-600.0,
+                batt_soc_percent=94.0,
+            )
+        )
+        self.assertIsNone(decision)
+        self.assertEqual(machine.state.evse_step_index, 1)
+
+        decision, _ = machine.tick(
+            make_inputs(
+                now_s=150.0,
+                pv_power_w=5000.0,
+                inverter_power_w=2000.0,
+                batt_power_w=-600.0,
+                batt_soc_percent=94.0,
+            )
+        )
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.current_command_amps, 8)
+        self.assertEqual(machine.state.evse_step_index, 2)
+
+    def test_step_down_holds_min_active_step_before_off(self) -> None:
+        """Controller reduces to the configured minimum step instead of toggling off."""
+
+        config = ControllerConfig(min_active_amps=6.0)
+        machine = DeterministicStateMachine(config)
+        machine.state = ControllerState(
+            mode_state=ModeState.MAIN_READY,
+            evse_step_index=2,
+            last_change_ts_s=0.0,
+        )
+
+        decision, _ = machine.tick(
+            make_inputs(now_s=120.0, pv_power_w=2000.0, inverter_power_w=4000.0)
+        )
+        self.assertIsNotNone(decision)
+        self.assertEqual(decision.current_command_amps, 6)
+        self.assertEqual(machine.state.evse_step_index, 1)
+
+        # Another deficit tick while already at min step forces a full stop
+        decision, _ = machine.tick(
+            make_inputs(now_s=150.0, pv_power_w=1500.0, inverter_power_w=4000.0)
+        )
+        self.assertIsNotNone(decision)
+        self.assertIsNone(decision.current_command_amps)
+        self.assertEqual(machine.state.evse_step_index, 0)
 
 
 if __name__ == "__main__":

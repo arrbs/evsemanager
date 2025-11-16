@@ -34,6 +34,8 @@ class ControllerConfig:
     probe_max_discharge_w: float = 1000.0
     probe_charge_margin_w: float = 50.0
     probe_discharge_margin_w: float = 200.0
+    probe_step_interval_s: float = 30.0
+    min_active_amps: float = 6.0
     inverter_limit_w: float = 8000.0
     inverter_margin_w: float = 500.0
     cooldown_s: float = 5.0
@@ -203,8 +205,19 @@ class DeterministicStateMachine:
                     evse_step_index=best_index,
                     mode_state=mode_state,
                     last_change_ts_s=inputs.now_s,
-                    pending_effect_ts_s=None,
+                    pending_effect_ts_s=inputs.now_s,
                 )
+
+    def _min_active_step_index(self) -> int:
+        min_amps = max(0.0, self.config.min_active_amps)
+        for idx, amps in enumerate(EVSE_STEPS_AMPS):
+            if amps >= min_amps:
+                return idx
+        return len(EVSE_STEPS_AMPS) - 1
+
+    def _step_down_index(self, allow_zero: bool = False) -> int:
+        min_index = 0 if allow_zero else self._min_active_step_index()
+        return max(min_index, self.state.evse_step_index - 1)
 
     def _derive(self, inputs: Inputs) -> DerivedValues:
         target_region = self._region_for_soc(inputs.batt_soc_percent)
@@ -345,8 +358,13 @@ class DeterministicStateMachine:
         if not derived.inverter_over_limit:
             return None
         if self.state.evse_step_index == 1:
-            return self._set_step(inputs, 0, "inverter_drop")
-        return self._set_step(inputs, self.state.evse_step_index - 1, "inverter_step_down")
+            return self._set_step(inputs, 0, "inverter_drop", allow_zero=True)
+        return self._set_step(
+            inputs,
+            self.state.evse_step_index - 1,
+            "inverter_step_down",
+            allow_zero=True,
+        )
 
     def _main_ready_logic(self, inputs: Inputs, derived: DerivedValues) -> Optional[Decision]:
         # Determine if we're in conservative mode (SOC below guard threshold)
@@ -357,8 +375,14 @@ class DeterministicStateMachine:
             if derived.excess_w is None and inputs.batt_power_w is not None:
                 # If battery is discharging in conservative mode, step down
                 if inputs.batt_power_w > 50:  # Discharging more than 50W
-                    next_index = max(0, self.state.evse_step_index - 1)
-                    return self._set_step(inputs, next_index, "main_conservative_batt_discharge")
+                    allow_zero = self.state.evse_step_index <= self._min_active_step_index()
+                    next_index = self._step_down_index(allow_zero=allow_zero)
+                    return self._set_step(
+                        inputs,
+                        next_index,
+                        "main_conservative_batt_discharge",
+                        allow_zero=allow_zero,
+                    )
         
         # Step-up path
         if self.state.evse_step_index > 0 and derived.excess_w is not None:
@@ -380,16 +404,28 @@ class DeterministicStateMachine:
                     return None
                 # Step down if not meeting the conservative charge target
                 if derived.excess_w < self.config.conservative_charge_target_w:
-                    next_index = max(0, self.state.evse_step_index - 1)
-                    return self._set_step(inputs, next_index, "main_conservative_step_down")
+                    allow_zero = self.state.evse_step_index <= self._min_active_step_index()
+                    next_index = self._step_down_index(allow_zero=allow_zero)
+                    return self._set_step(
+                        inputs,
+                        next_index,
+                        "main_conservative_step_down",
+                        allow_zero=allow_zero,
+                    )
             else:
                 # Normal mode: allow small discharge margin
                 if derived.excess_w >= -self.config.small_discharge_margin_w:
                     return None
                 # Step-down when exceeding discharge margin
                 if derived.excess_w < -self.config.small_discharge_margin_w:
-                    next_index = max(0, self.state.evse_step_index - 1)
-                    return self._set_step(inputs, next_index, "main_step_down")
+                    allow_zero = self.state.evse_step_index <= self._min_active_step_index()
+                    next_index = self._step_down_index(allow_zero=allow_zero)
+                    return self._set_step(
+                        inputs,
+                        next_index,
+                        "main_step_down",
+                        allow_zero=allow_zero,
+                    )
         return None
 
     def _is_conservative_mode(self, batt_soc: Optional[float]) -> bool:
@@ -409,29 +445,35 @@ class DeterministicStateMachine:
         hysteresis = self.config.soc_hysteresis
         if soc is None:
             soc = target
+        min_interval = max(0.0, self.config.probe_step_interval_s)
+        window_elapsed = derived.time_since_last_change >= min_interval
 
         def can_step_up() -> bool:
             return (
                 self.state.evse_step_index < len(EVSE_STEPS_AMPS) - 1
                 and derived.effect_ready
                 and self._inverter_safe(inputs, self.state.evse_step_index)
+                and window_elapsed
             )
 
-        def step_down(reason: str) -> Optional[Decision]:
-            next_index = max(0, self.state.evse_step_index - 1)
+        def step_down(reason: str, *, urgent: bool = False) -> Optional[Decision]:
+            if not urgent and not window_elapsed:
+                return None
+            allow_zero = urgent or self.state.evse_step_index <= self._min_active_step_index()
+            next_index = self._step_down_index(allow_zero=allow_zero)
             if next_index == self.state.evse_step_index:
                 return None
-            return self._set_step(inputs, next_index, reason)
+            return self._set_step(inputs, next_index, reason, allow_zero=allow_zero)
 
         # Hard safety: never allow discharge beyond probe_max_discharge_w
         if batt_power >= self.config.probe_max_discharge_w:
-            return step_down("probe_max_discharge")
+            return step_down("probe_max_discharge", urgent=True)
 
         below_band = soc <= (target - hysteresis)
         above_band = soc >= (target + hysteresis)
 
         if above_band:
-            return step_down("probe_soc_high_step_down")
+            return step_down("probe_soc_high_step_down", urgent=True)
 
         if below_band:
             if can_step_up():
@@ -460,8 +502,16 @@ class DeterministicStateMachine:
         curr_amp = EVSE_STEPS_AMPS[index]
         return (next_amp - curr_amp) * self.config.line_voltage_v
 
-    def _set_step(self, inputs: Inputs, new_index: int, reason: str) -> Decision:
-        new_index = max(0, min(new_index, len(EVSE_STEPS_AMPS) - 1))
+    def _set_step(
+        self,
+        inputs: Inputs,
+        new_index: int,
+        reason: str,
+        *,
+        allow_zero: bool = False,
+    ) -> Decision:
+        min_index = 0 if allow_zero else self._min_active_step_index()
+        new_index = max(min_index, min(new_index, len(EVSE_STEPS_AMPS) - 1))
         old_index = self.state.evse_step_index
         target_mode = ModeState.OFF
         if new_index == 0:

@@ -96,6 +96,7 @@ Expose `AUTO_ENABLED` (e.g., `input_boolean.evse_auto_enabled`). When false, the
 | `LINE_VOLTAGE_V` | 230 | Used for power-step calculations. |
 | `SOC_MAIN_MAX` | 95.0 | MAIN vs PROBE split threshold. |
 | `SMALL_DISCHARGE_MARGIN_W` | 200 | Allowed discharge before stepping down. |
+| `MIN_ACTIVE_AMPS` | 6 | Lowest EVSE step to hold before powering off. |
 | `PROBE_MAX_DISCHARGE_W` | 1000 | Max discharge in PROBE mode before stepping down. |
 | `INVERTER_LIMIT_W` | 8000 | Inverter hard limit. |
 | `INVERTER_MARGIN_W` | 500 | Safety margin. |
@@ -187,8 +188,8 @@ Action: no change; remain in MAIN_READY.
 
 Trigger: `Excess_W < -SMALL_DISCHARGE_MARGIN_W`.
 
-- If `evse_step_index == 1` (6 A), shut off (index 0, switch off).
-- Else decrement index by one, keep switch on, set current, update timestamps.
+- If `evse_step_index` is above the `MIN_ACTIVE_AMPS` step, decrement index by one, keep the switch on, set current, update timestamps.
+- If already at or below `MIN_ACTIVE_AMPS`, shut off (index 0, switch off) as a last resort.
 - Always enter MAIN_COOLDOWN after a downstep.
 
 ### 7.5 Max Step Behavior
@@ -232,8 +233,8 @@ Action: hold PROBE_READY.
 
 Trigger: `BattP_W > PROBE_MAX_DISCHARGE_W`.
 
-- If at 6 A → OFF.
-- Else decrement index, keep switch on, set number, enter PROBE_COOLDOWN.
+- If above the `MIN_ACTIVE_AMPS` step, decrement index, keep the switch on, set number, enter PROBE_COOLDOWN.
+- If already at or below `MIN_ACTIVE_AMPS`, shut off (index 0) as a last resort to stop battery discharge.
 
 ---
 

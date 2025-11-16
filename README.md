@@ -47,6 +47,7 @@ inverter_limit_w: 8000     # Hard cap reported by inverter
 inverter_margin_w: 500     # Safety cushion below inverter limit
 probe_max_discharge_w: 1000
 small_discharge_margin_w: 200
+min_active_amps: 6         # Minimum EVSE step to hold before shutting off
 
 log_level: INFO            # DEBUG for verbose FSM traces
 auto_enabled_default: true # Fallback when auto entity missing/unavailable
