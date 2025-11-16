@@ -423,6 +423,28 @@ class PowerManager:
         Returns:
             Target current in amps, or None if no change needed
         """
+        # In aggressive discharge mode, force stepping up regardless of calculated power
+        in_aggressive = self.is_aggressive_discharge_mode()
+        if in_aggressive:
+            # Find next higher current step
+            allowed = charger_controller.allowed_currents
+            current_idx = None
+            for i, amp in enumerate(allowed):
+                if abs(amp - current_amps) < 0.5:  # Match current level
+                    current_idx = i
+                    break
+            
+            if current_idx is not None and current_idx < len(allowed) - 1:
+                # Step up to next level
+                next_amps = allowed[current_idx + 1]
+                self.logger.info(f"⚡ Aggressive mode: stepping up {current_amps}A → {next_amps}A to discharge battery")
+                return next_amps
+            else:
+                # Already at max or can't find current level
+                self.logger.debug(f"Aggressive mode: already at max current {current_amps}A")
+                return None
+        
+        # Normal mode: calculate based on available power
         # Convert current amps to watts
         current_watts = charger_controller.amps_to_watts(current_amps)
         
@@ -432,20 +454,13 @@ class PowerManager:
         if available_power is None:
             return None
         
-        # In aggressive discharge mode, always try to step up to discharge battery
-        in_aggressive = self.is_aggressive_discharge_mode()
-        
         # Calculate power difference
         power_diff = available_power - current_watts
         
         # Apply hysteresis - only adjust if change is significant
-        # BUT in aggressive mode, always allow increases to discharge battery
         if abs(power_diff) < self.hysteresis:
-            if not in_aggressive or power_diff <= 0:
-                self.logger.info(f"Power diff {power_diff:.1f}W within hysteresis {self.hysteresis}W (available={available_power:.1f}W, current={current_watts:.1f}W)")
-                return None
-            else:
-                self.logger.info(f"Aggressive mode: stepping up despite small diff {power_diff:.1f}W to discharge battery")
+            self.logger.info(f"Power diff {power_diff:.1f}W within hysteresis {self.hysteresis}W (available={available_power:.1f}W, current={current_watts:.1f}W)")
+            return None
         
         # Calculate target power
         target_watts = current_watts + power_diff
