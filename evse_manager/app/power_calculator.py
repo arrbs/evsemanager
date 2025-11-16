@@ -205,15 +205,16 @@ class BatteryCalculator(PowerCalculator):
                 
                 if for_display:
                     # VISUALIZATION LOGIC
+                    # Note: load_power passed in is already house-only (EV subtracted upstream)
                     if soc >= 95:
                         # Show current EV power (we're allowing battery discharge)
                         available = current_ev_watts
                         self.logger.debug(f"Display (SOC≥95%): Showing current EV {available:.0f}W")
                     else:
-                        # Show available solar: PV - House Load (excluding EV)
-                        house_load = load_power - current_ev_watts if current_ev_watts > 0 else load_power
-                        available = pv_power - house_load
-                        self.logger.debug(f"Display (SOC<95%): PV {pv_power:.0f}W - House {house_load:.0f}W = {available:.0f}W")
+                        # Show available solar: PV - House Load
+                        # load_power is house-only, so don't subtract EV again
+                        available = pv_power - load_power
+                        self.logger.debug(f"Display (SOC<95%): PV {pv_power:.0f}W - House {load_power:.0f}W = {available:.0f}W")
                 else:
                     # CONTROL DECISION LOGIC
                     if soc >= 95:

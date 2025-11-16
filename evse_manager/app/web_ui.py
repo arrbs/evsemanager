@@ -310,6 +310,26 @@ HTML_TEMPLATE = """
             border-color: rgba(239, 83, 80, 0.5);
             color: #fecaca;
         }
+        .time-range-btn {
+            padding: 6px 14px;
+            border-radius: 6px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .time-range-btn:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        .time-range-btn.active {
+            background: rgba(34, 197, 94, 0.25);
+            border-color: rgba(34, 197, 94, 0.5);
+            color: #22c55e;
+        }
         @media (max-width: 768px) {
             .energy-bottom { flex-direction: column; }
             .energy-steps { width: 100%; }
@@ -689,6 +709,13 @@ HTML_TEMPLATE = """
                 <div><span class="legend-dot target"></span>Target</div>
                 <div><span class="legend-dot limit"></span>Inverter Limit</div>
             </div>
+            <div style="display: flex; justify-content: center; gap: 8px; margin-top: 12px;">
+                <button class="time-range-btn" onclick="setChartTimeRange(60)" data-range="60">5m</button>
+                <button class="time-range-btn active" onclick="setChartTimeRange(120)" data-range="120">10m</button>
+                <button class="time-range-btn" onclick="setChartTimeRange(180)" data-range="180">15m</button>
+                <button class="time-range-btn" onclick="setChartTimeRange(360)" data-range="360">30m</button>
+                <button class="time-range-btn" onclick="setChartTimeRange(720)" data-range="720">1h</button>
+            </div>
             <div class="energy-bottom">
                 <div class="energy-metrics">
                     <div class="energy-metric">
@@ -821,7 +848,7 @@ HTML_TEMPLATE = """
         };
         const wattFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
         const kwFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
-        const ENERGY_HISTORY_LIMIT = 120;
+        let ENERGY_HISTORY_LIMIT = 120;
         let energyChart = null;
         let currentMode = null;
         let pendingMode = null;
@@ -1042,18 +1069,28 @@ HTML_TEMPLATE = """
             const labels = normalized.map((_, idx) => {
                 const ts = timestamps[idx];
                 if (ts === null) {
-                    const fallback = normalized.length - idx;
-                    return `${fallback}s ago`;
+                    return '';
                 }
                 const delta = Math.round((latestTs - ts) / 1000);
+                // Show time labels at regular intervals
+                const totalPoints = normalized.length;
+                const showEvery = Math.max(1, Math.floor(totalPoints / 8));
+                if (idx % showEvery !== 0 && idx !== totalPoints - 1) {
+                    return '';
+                }
                 if (delta === 0) {
                     return 'now';
                 }
                 if (delta < 60) {
-                    return `${delta}s ago`;
+                    return `${delta}s`;
                 }
                 const mins = Math.floor(delta / 60);
-                return `${mins}m ago`;
+                if (mins < 60) {
+                    return `${mins}m`;
+                }
+                const hours = Math.floor(mins / 60);
+                const remainMins = mins % 60;
+                return remainMins > 0 ? `${hours}h${remainMins}m` : `${hours}h`;
             });
             const availableSeries = normalized.map(sample => safeNumber(sample.available));
             const pvSeries = normalized.map(sample => safeNumber(sample.pv));
@@ -1262,6 +1299,7 @@ HTML_TEMPLATE = """
         }
         
         function updateUI(data) {
+            window.lastStatusData = data;  // Store for chart time range changes
             updateEnergyState(data);
             // Learning status
             if (data.learning_status && data.learning_status.enabled) {
@@ -1475,6 +1513,19 @@ HTML_TEMPLATE = """
             successDiv.textContent = message;
             successDiv.style.display = 'block';
             setTimeout(() => successDiv.style.display = 'none', 3000);
+        }
+        
+        function setChartTimeRange(samples) {
+            ENERGY_HISTORY_LIMIT = samples;
+            // Update active button
+            document.querySelectorAll('.time-range-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.range === String(samples));
+            });
+            // Force chart refresh with new limit
+            const lastData = window.lastStatusData;
+            if (lastData && lastData.energy_map) {
+                updateEnergyChart(lastData.energy_map, lastData);
+            }
         }
         
         function setControlsDisabled(disabled) {
