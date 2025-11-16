@@ -235,15 +235,18 @@ class BatteryCalculator(PowerCalculator):
                         margin = pv_power - load_power
                         if normalized_power < 0:
                             # Battery STILL CHARGING despite SOC≥95% = lots of excess solar
-                            # Report MUCH higher available to probe upward and discharge battery
-                            # The system has excess = margin + what's going to battery + likely more
+                            # We can use ALL the PV power - battery will discharge to make up any deficit
+                            # This is the whole point of having a battery at 95%+
                             excess_to_battery = abs(normalized_power)
-                            # Assume we can pull at least 2-3x what's currently going to battery
-                            probing_bonus = excess_to_battery * 3
-                            available = margin + excess_to_battery + probing_bonus
+                            # Report very high available to force EV to pull more and discharge battery
+                            # Use 5x multiplier or cap at total PV power, whichever is higher
+                            probing_bonus = excess_to_battery * 5
+                            aggressive_available = margin + excess_to_battery + probing_bonus
+                            # Cap at total PV - we have battery backup so this is safe
+                            available = min(aggressive_available, pv_power)
                             self.logger.info(
                                 f"Control (SOC≥95%, battery charging): AGGRESSIVE mode - "
-                                f"margin {margin:.0f}W + battery {excess_to_battery:.0f}W + probe {probing_bonus:.0f}W = {available:.0f}W available"
+                                f"margin {margin:.0f}W + battery {excess_to_battery:.0f}W + probe {probing_bonus:.0f}W = {aggressive_available:.0f}W (capped at PV {pv_power:.0f}W)"
                             )
                         elif normalized_power > 0 and normalized_power <= self.target_discharge_max:
                             # Battery discharging at acceptable rate - maintain or increase
