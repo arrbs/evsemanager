@@ -440,6 +440,16 @@ class PowerManager:
         
         return False
 
+    def get_power_history(self, samples: int = 60) -> list[float]:
+        """Return recent raw available-power samples for visualization."""
+        try:
+            history = list(self.calculator.power_history)
+        except AttributeError:
+            return []
+        if samples > 0:
+            history = history[-samples:]
+        return [value for _, value in history]
+
     def set_battery_priority_soc(self, value: int):
         """Update the battery priority SOC threshold when battery method is active."""
         if self.method == 'battery' and hasattr(self.calculator, 'priority_soc'):

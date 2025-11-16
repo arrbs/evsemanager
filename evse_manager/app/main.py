@@ -598,6 +598,19 @@ class EVSEManager:
         battery_priority_active = self.check_battery_priority()
         battery_info = None
         battery_priority_soc_threshold = sensors.get('battery_priority_soc', 80)
+        pv_entity = sensors.get('total_pv_entity')
+        load_entity = sensors.get('total_load_entity')
+        grid_entity = sensors.get('grid_power_entity')
+
+        def _read_sensor(entity):
+            if not entity:
+                return None
+            try:
+                raw = self.ha_api.get_state(entity)
+                return float(raw) if raw is not None else None
+            except Exception as exc:  # noqa: BLE001
+                self.logger.debug(f"Unable to read sensor {entity}: {exc}")
+                return None
 
         if soc_entity and power_entity:
             try:
@@ -624,6 +637,20 @@ class EVSEManager:
             except Exception as exc:  # noqa: BLE001
                 self.logger.debug(f"Unable to capture battery telemetry: {exc}")
                 battery_info = None
+
+        total_pv_power = _read_sensor(pv_entity)
+        total_load_power = _read_sensor(load_entity)
+        grid_power = _read_sensor(grid_entity)
+        power_history = self.power_manager.get_power_history(60)
+        evse_steps = [
+            {
+                'amps': amps,
+                'watts': self.charger.amps_to_watts(amps)
+            }
+            for amps in self.charger.allowed_currents
+        ]
+        current_watts = self.charger.amps_to_watts(current_amps)
+        target_watts = self.charger.amps_to_watts(target_current) if target_current else None
 
         active_failed_reason = self._get_active_failed_reason()
 
@@ -758,7 +785,20 @@ class EVSEManager:
             'session_info': self.session_manager.get_current_session_info(),
             'stats': self.session_manager.get_stats(),
             'recent_sessions': self.session_manager.get_recent_sessions(10),
-            'learning_status': self.adaptive_tuner.get_learning_status() if self.adaptive_tuner else None
+            'learning_status': self.adaptive_tuner.get_learning_status() if self.adaptive_tuner else None,
+            'power_method': self.config.get('power_method', 'battery'),
+            'total_pv_power': total_pv_power,
+            'house_load_power': total_load_power,
+            'grid_power': grid_power,
+            'energy_map': {
+                'history': power_history,
+                'evse_steps': evse_steps,
+                'current_watts': current_watts,
+                'target_watts': target_watts,
+                'available_power': available_power,
+                'inverter_limit': self.power_manager.inverter_max_power,
+                'battery_guard_soc': battery_priority_soc_threshold
+            }
         }
         
         # Publish all entities

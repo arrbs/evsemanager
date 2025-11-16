@@ -132,6 +132,153 @@ HTML_TEMPLATE = """
             align-items: baseline;
             gap: 6px;
         }
+        .energy-state-card {
+            padding: 24px;
+            border-radius: 18px;
+            background: linear-gradient(135deg, #0f172a, #1e1b4b);
+            color: white;
+            box-shadow: 0 25px 50px rgba(15, 23, 42, 0.4);
+            margin-bottom: 24px;
+            position: relative;
+            overflow: hidden;
+        }
+        .energy-state-card::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at top right, rgba(79, 70, 229, 0.35), transparent 45%);
+            pointer-events: none;
+        }
+        .energy-header {
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 18px;
+            position: relative;
+            z-index: 2;
+        }
+        .energy-chips {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .energy-chip {
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 600;
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        .energy-chip-outline {
+            background: rgba(15, 23, 42, 0.4);
+            border-color: rgba(255, 255, 255, 0.25);
+        }
+        #energy-state-chart {
+            width: 100%;
+            height: 260px;
+            position: relative;
+            z-index: 2;
+        }
+        .energy-legend {
+            margin-top: 16px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: rgba(255, 255, 255, 0.7);
+            position: relative;
+            z-index: 2;
+        }
+        .legend-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .legend-dot.available { background: #4caf50; }
+        .legend-dot.pv { background: #ffc107; }
+        .legend-dot.current { background: #ff7043; }
+        .legend-dot.target { background: #64b5f6; }
+        .legend-dot.limit { background: #ef5350; }
+        .energy-bottom {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 22px;
+            position: relative;
+            z-index: 2;
+        }
+        .energy-metrics {
+            flex: 2;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 16px;
+        }
+        .energy-metric {
+            background: rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 14px;
+        }
+        .energy-metric .hero-value {
+            color: white;
+            font-size: 28px;
+        }
+        .energy-metric .metric-label { color: rgba(255, 255, 255, 0.65); }
+        .energy-metric .metric-subtext { color: rgba(255, 255, 255, 0.55); }
+        .energy-steps {
+            flex: 1;
+            min-width: 220px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .step-pill {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 14px;
+            border-radius: 10px;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(15, 23, 42, 0.4);
+            font-size: 13px;
+        }
+        .step-pill.current {
+            border-color: #4caf50;
+            box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.3);
+        }
+        .step-pill.target {
+            border-color: #64b5f6;
+        }
+        .step-pill small {
+            color: rgba(255, 255, 255, 0.7);
+        }
+        .energy-badges {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .energy-badge {
+            padding: 6px 14px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            font-size: 12px;
+            font-weight: 600;
+            color: rgba(255, 255, 255, 0.85);
+        }
+        @media (max-width: 768px) {
+            .energy-bottom { flex-direction: column; }
+            .energy-steps { width: 100%; }
+            .energy-chips { justify-content: flex-start; }
+        }
         
         .metric-grid {
             display: grid;
@@ -481,6 +628,71 @@ HTML_TEMPLATE = """
             </div>
         </div>
 
+        <div class="card energy-state-card">
+            <div class="energy-header">
+                <div>
+                    <div class="hero-title" style="color: rgba(255,255,255,0.7);">Energy State</div>
+                    <div class="hero-status" id="energy-band-label" style="color: white;">Tracking Solar Flow</div>
+                </div>
+                <div class="energy-chips">
+                    <span class="energy-chip" id="power-method-chip">Method</span>
+                    <span class="energy-chip energy-chip-outline" id="energy-status-chip">Idle</span>
+                    <span class="energy-chip energy-chip-outline">PV <span id="total-pv-chip">-</span> W</span>
+                    <span class="energy-chip energy-chip-outline">Load <span id="house-load-chip">-</span> W</span>
+                    <span class="energy-chip energy-chip-outline">Grid <span id="grid-chip">-</span> W</span>
+                </div>
+            </div>
+            <canvas id="energy-state-chart"></canvas>
+            <div class="energy-legend">
+                <div><span class="legend-dot available"></span>Available</div>
+                <div><span class="legend-dot pv"></span>Total PV</div>
+                <div><span class="legend-dot current"></span>EV Draw</div>
+                <div><span class="legend-dot target"></span>Target</div>
+                <div><span class="legend-dot limit"></span>Inverter Limit</div>
+            </div>
+            <div class="energy-bottom">
+                <div class="energy-metrics">
+                    <div class="energy-metric">
+                        <div class="metric-label">Available Solar</div>
+                        <div class="hero-value"><span id="energy-available-watts">-</span><span class="metric-unit">W</span></div>
+                        <div class="metric-subtext">Headroom after smoothing</div>
+                    </div>
+                    <div class="energy-metric">
+                        <div class="metric-label">EV Draw</div>
+                        <div class="hero-value"><span id="energy-current-watts">-</span><span class="metric-unit">W</span></div>
+                        <div class="metric-subtext">Current at charger</div>
+                    </div>
+                    <div class="energy-metric">
+                        <div class="metric-label">Target Band</div>
+                        <div class="hero-value"><span id="energy-target-watts">-</span><span class="metric-unit">W</span></div>
+                        <div class="metric-subtext">Nearest safe step</div>
+                    </div>
+                    <div class="energy-metric">
+                        <div class="metric-label">PV Array</div>
+                        <div class="hero-value"><span id="pv-power">-</span><span class="metric-unit">W</span></div>
+                        <div class="metric-subtext">Instantaneous production</div>
+                    </div>
+                    <div class="energy-metric">
+                        <div class="metric-label">House Load</div>
+                        <div class="hero-value"><span id="house-load-power">-</span><span class="metric-unit">W</span></div>
+                        <div class="metric-subtext">Whole-home demand</div>
+                    </div>
+                    <div class="energy-metric">
+                        <div class="metric-label">Grid Delta</div>
+                        <div class="hero-value"><span id="grid-power-value">-</span><span class="metric-unit">W</span></div>
+                        <div class="metric-subtext">Export (-) / Import (+)</div>
+                    </div>
+                </div>
+                <div class="energy-steps" id="evse-step-grid">
+                    <div class="step-pill">Loading EVSE steps…</div>
+                </div>
+            </div>
+            <div class="energy-badges">
+                <span class="energy-badge" id="battery-guard-pill">Battery guard --%</span>
+                <span class="energy-badge" id="grid-balance-pill">Grid balance --</span>
+            </div>
+        </div>
+
         <div class="dashboard-grid">
             <div class="card controls-card">
                 <div class="card-heading">
@@ -592,6 +804,7 @@ HTML_TEMPLATE = """
         </div>
     </div>
     
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js"></script>
     <script>
         const LIMITING_LABELS = {
             battery_priority: 'Battery Priority',
@@ -603,6 +816,10 @@ HTML_TEMPLATE = """
             charger_refused: 'Charger Refused',
             vehicle_charged: 'Vehicle Charged'
         };
+        const wattFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+        const kwFormatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+        const ENERGY_HISTORY_LIMIT = 120;
+        let energyChart = null;
         let currentMode = null;
         let pendingMode = null;
         let pendingModeTimestamp = 0;
@@ -613,6 +830,277 @@ HTML_TEMPLATE = """
 
         function pendingExpired(timestamp) {
             return (Date.now() - timestamp) > PENDING_TIMEOUT_MS;
+        }
+
+        function formatWattsValue(value, fallback = '--') {
+            if (typeof value !== 'number' || Number.isNaN(value)) {
+                return fallback;
+            }
+            return wattFormatter.format(value);
+        }
+
+        function formatSignedWatts(value) {
+            if (typeof value !== 'number' || Number.isNaN(value)) {
+                return '--';
+            }
+            const sign = value > 0 ? '+' : '';
+            return `${sign}${wattFormatter.format(value)}`;
+        }
+
+        function ensureEnergyChart() {
+            if (energyChart || typeof Chart === 'undefined') {
+                return energyChart;
+            }
+            const canvas = document.getElementById('energy-state-chart');
+            if (!canvas) {
+                return null;
+            }
+            const ctx = canvas.getContext('2d');
+            energyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'Available',
+                            data: [],
+                            borderColor: '#4caf50',
+                            backgroundColor: 'rgba(76, 175, 80, 0.15)',
+                            fill: true,
+                            tension: 0.35,
+                            borderWidth: 2,
+                            pointRadius: 0
+                        },
+                        {
+                            label: 'Total PV',
+                            data: [],
+                            borderColor: 'rgba(255, 193, 7, 0.9)',
+                            borderWidth: 1.5,
+                            borderDash: [6, 4],
+                            tension: 0.35,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Target',
+                            data: [],
+                            borderColor: '#64b5f6',
+                            borderWidth: 2,
+                            borderDash: [4, 4],
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Current',
+                            data: [],
+                            borderColor: '#ff7043',
+                            borderWidth: 1.8,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
+                            label: 'Inverter limit',
+                            data: [],
+                            borderColor: '#ef5350',
+                            borderWidth: 1.5,
+                            borderDash: [2, 6],
+                            pointRadius: 0,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label(context) {
+                                    const label = context.dataset.label || '';
+                                    const value = context.parsed.y;
+                                    if (typeof value !== 'number' || Number.isNaN(value)) {
+                                        return null;
+                                    }
+                                    const watts = wattFormatter.format(value);
+                                    const kw = kwFormatter.format(value / 1000);
+                                    return `${label}: ${watts} W (${kw} kW)`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                color: 'rgba(255,255,255,0.7)',
+                                callback(value) {
+                                    return `${wattFormatter.format(value)} W`;
+                                }
+                            },
+                            grid: { color: 'rgba(255,255,255,0.08)' }
+                        },
+                        x: {
+                            ticks: { color: 'rgba(255,255,255,0.6)' },
+                            grid: { display: false }
+                        }
+                    }
+                }
+            });
+            return energyChart;
+        }
+
+        function computeAxisMax(seriesList) {
+            let maxValue = 0;
+            seriesList.forEach(series => {
+                if (!Array.isArray(series)) {
+                    return;
+                }
+                series.forEach(value => {
+                    if (typeof value === 'number' && !Number.isNaN(value)) {
+                        maxValue = Math.max(maxValue, value);
+                    }
+                });
+            });
+            if (maxValue <= 0) {
+                return 2000;
+            }
+            const step = 500;
+            return Math.ceil(maxValue / step) * step + step;
+        }
+
+        function updateEnergyChart(energyMap, data) {
+            const chart = ensureEnergyChart();
+            if (!chart) {
+                return;
+            }
+            const rawHistory = Array.isArray(energyMap.history) ? [...energyMap.history] : [];
+            const trimmedHistory = rawHistory.slice(-ENERGY_HISTORY_LIMIT);
+            if (trimmedHistory.length === 0) {
+                const fallback = typeof energyMap.available_power === 'number' ? energyMap.available_power : 0;
+                trimmedHistory.push(fallback);
+            }
+            const labels = trimmedHistory.map((_, idx) => `${idx - trimmedHistory.length + 1}s`);
+            const baseLength = trimmedHistory.length;
+            const buildFlatSeries = (value) => Array.from({ length: baseLength }, () => (typeof value === 'number' ? value : null));
+            const pvSeries = buildFlatSeries(data.total_pv_power);
+            const targetSeries = buildFlatSeries(energyMap.target_watts);
+            const currentSeries = buildFlatSeries(energyMap.current_watts);
+            const inverterSeries = buildFlatSeries(energyMap.inverter_limit);
+            chart.data.labels = labels;
+            chart.data.datasets[0].data = trimmedHistory;
+            chart.data.datasets[1].data = pvSeries;
+            chart.data.datasets[2].data = targetSeries;
+            chart.data.datasets[3].data = currentSeries;
+            chart.data.datasets[4].data = inverterSeries;
+            const axisMax = computeAxisMax([trimmedHistory, pvSeries, targetSeries, currentSeries, inverterSeries]);
+            if (chart.options?.scales?.y) {
+                chart.options.scales.y.suggestedMax = axisMax;
+                chart.options.scales.y.max = axisMax;
+            }
+            chart.update('none');
+        }
+
+        function updateEvseSteps(energyMap, data) {
+            const container = document.getElementById('evse-step-grid');
+            if (!container) {
+                return;
+            }
+            const steps = Array.isArray(energyMap.evse_steps) ? energyMap.evse_steps : [];
+            if (!steps.length) {
+                container.innerHTML = '<div class="step-pill">EVSE steps unavailable</div>';
+                return;
+            }
+            const currentWatts = energyMap.current_watts;
+            const targetWatts = energyMap.target_watts;
+            container.innerHTML = steps.map(step => {
+                const isCurrent = typeof currentWatts === 'number' && Math.abs(step.watts - currentWatts) < 200;
+                const isTarget = typeof targetWatts === 'number' && Math.abs(step.watts - targetWatts) < 200 && !isCurrent;
+                const classes = ['step-pill'];
+                if (isCurrent) {
+                    classes.push('current');
+                }
+                if (isTarget) {
+                    classes.push('target');
+                }
+                return `<div class="${classes.join(' ')}"><span>${step.amps}A</span><small>${formatWattsValue(step.watts)} W</small></div>`;
+            }).join('');
+        }
+
+        function updateEnergyState(data) {
+            const energyMap = data.energy_map || {};
+            const modeLabel = document.getElementById('power-method-chip');
+            if (modeLabel) {
+                const methodLabel = (data.power_method || 'battery').replace(/_/g, ' ');
+                modeLabel.textContent = methodLabel.charAt(0).toUpperCase() + methodLabel.slice(1);
+            }
+            const stateChip = document.getElementById('energy-status-chip');
+            if (stateChip) {
+                stateChip.textContent = data.auto_state_label || data.charger_status || 'Idle';
+            }
+            const pvChip = document.getElementById('total-pv-chip');
+            if (pvChip) {
+                pvChip.textContent = formatWattsValue(data.total_pv_power);
+            }
+            const loadChip = document.getElementById('house-load-chip');
+            if (loadChip) {
+                loadChip.textContent = formatWattsValue(data.house_load_power);
+            }
+            const gridChip = document.getElementById('grid-chip');
+            if (gridChip) {
+                gridChip.textContent = formatSignedWatts(data.grid_power);
+            }
+            const guardPill = document.getElementById('battery-guard-pill');
+            if (guardPill) {
+                const guardValue = energyMap.battery_guard_soc ?? data.battery_priority_soc;
+                guardPill.textContent = typeof guardValue === 'number' ? `Battery guard ${guardValue}%` : 'Battery guard --%';
+            }
+            const gridBalance = document.getElementById('grid-balance-pill');
+            if (gridBalance) {
+                if (typeof data.grid_power === 'number') {
+                    gridBalance.textContent = data.grid_power >= 0 ? `Importing ${formatWattsValue(data.grid_power)} W` : `Exporting ${formatWattsValue(Math.abs(data.grid_power))} W`;
+                } else {
+                    gridBalance.textContent = 'Grid balance --';
+                }
+            }
+            const pvMetric = document.getElementById('pv-power');
+            if (pvMetric) {
+                pvMetric.textContent = formatWattsValue(data.total_pv_power);
+            }
+            const loadMetric = document.getElementById('house-load-power');
+            if (loadMetric) {
+                loadMetric.textContent = formatWattsValue(data.house_load_power);
+            }
+            const gridMetric = document.getElementById('grid-power-value');
+            if (gridMetric) {
+                gridMetric.textContent = formatSignedWatts(data.grid_power);
+            }
+            const availableMetric = document.getElementById('energy-available-watts');
+            if (availableMetric) {
+                availableMetric.textContent = formatWattsValue(energyMap.available_power ?? data.available_power);
+            }
+            const currentMetric = document.getElementById('energy-current-watts');
+            if (currentMetric) {
+                currentMetric.textContent = formatWattsValue(energyMap.current_watts);
+            }
+            const targetMetric = document.getElementById('energy-target-watts');
+            if (targetMetric) {
+                targetMetric.textContent = formatWattsValue(energyMap.target_watts);
+            }
+            const bandLabel = document.getElementById('energy-band-label');
+            if (bandLabel) {
+                if (data.status === 'active') {
+                    bandLabel.textContent = 'Charging window';
+                } else if (data.auto_state_label) {
+                    bandLabel.textContent = data.auto_state_label;
+                } else {
+                    bandLabel.textContent = 'Tracking solar flow';
+                }
+            }
+            updateEnergyChart(energyMap, data);
+            updateEvseSteps(energyMap, data);
         }
 
         function applyModeVisualState(mode) {
@@ -682,6 +1170,7 @@ HTML_TEMPLATE = """
         }
         
         function updateUI(data) {
+            updateEnergyState(data);
             // Learning status
             if (data.learning_status && data.learning_status.enabled) {
                 const learningBanner = document.getElementById('learning-banner');
