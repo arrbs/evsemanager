@@ -762,8 +762,9 @@ class EVSEManager:
             }
             for amps in self.charger.allowed_currents
         ]
-        current_watts = self.charger.amps_to_watts(current_amps)
-        target_watts = self.charger.amps_to_watts(target_current) if target_current else None
+        # Only show actual EV draw when charging, not configured setting
+        current_watts = current_ev_watts  # Already 0 if not charging
+        target_watts = self.charger.amps_to_watts(target_current) if (target_current and self.session_active) else 0
 
         self._record_energy_trace(
             available_power,
