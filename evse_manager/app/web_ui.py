@@ -163,6 +163,18 @@ HTML_TEMPLATE = """
             width: 100% !important;
             height: 100% !important;
         }
+        .energy-chart-wrapper.chart-empty::after {
+            content: 'Waiting for live telemetry…';
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 600;
+            color: rgba(15, 23, 42, 0.55);
+            letter-spacing: 0.05em;
+        }
         .energy-header {
             display: flex;
             align-items: flex-start;
@@ -199,7 +211,7 @@ HTML_TEMPLATE = """
             font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            color: rgba(255, 255, 255, 0.7);
+            color: rgba(15, 23, 42, 0.75);
             position: relative;
             z-index: 2;
         }
@@ -210,11 +222,12 @@ HTML_TEMPLATE = """
             display: inline-block;
             margin-right: 6px;
         }
-        .legend-dot.available { background: #4caf50; }
-        .legend-dot.pv { background: #ffc107; }
-        .legend-dot.current { background: #ff7043; }
-        .legend-dot.target { background: #64b5f6; }
-        .legend-dot.limit { background: #ef5350; }
+        .legend-dot.available { background: #22c55e; }
+        .legend-dot.pv { background: #fbbf24; }
+        .legend-dot.load { background: #a78bfa; }
+        .legend-dot.current { background: #fb923c; }
+        .legend-dot.target { background: #60a5fa; }
+        .legend-dot.limit { background: #ef4444; }
         .energy-bottom {
             display: flex;
             flex-wrap: wrap;
@@ -664,6 +677,7 @@ HTML_TEMPLATE = """
             <div class="energy-legend">
                 <div><span class="legend-dot available"></span>Available</div>
                 <div><span class="legend-dot pv"></span>Total PV</div>
+                <div><span class="legend-dot load"></span>House Load</div>
                 <div><span class="legend-dot current"></span>EV Draw</div>
                 <div><span class="legend-dot target"></span>Target</div>
                 <div><span class="legend-dot limit"></span>Inverter Limit</div>
@@ -829,6 +843,14 @@ HTML_TEMPLATE = """
             return `${sign}${wattFormatter.format(value)}`;
         }
 
+        function safeNumber(value) {
+            if (value === null || value === undefined) {
+                return null;
+            }
+            const num = Number(value);
+            return Number.isFinite(num) ? num : null;
+        }
+
         function ensureEnergyChart() {
             if (energyChart || typeof Chart === 'undefined') {
                 return energyChart;
@@ -846,8 +868,8 @@ HTML_TEMPLATE = """
                         {
                             label: 'Available',
                             data: [],
-                            borderColor: '#4caf50',
-                            backgroundColor: 'rgba(76, 175, 80, 0.15)',
+                            borderColor: '#22c55e',
+                            backgroundColor: 'rgba(34, 197, 94, 0.18)',
                             fill: true,
                             tension: 0.35,
                             borderWidth: 2,
@@ -856,7 +878,7 @@ HTML_TEMPLATE = """
                         {
                             label: 'Total PV',
                             data: [],
-                            borderColor: 'rgba(255, 193, 7, 0.9)',
+                            borderColor: '#fbbf24',
                             borderWidth: 1.5,
                             borderDash: [6, 4],
                             tension: 0.35,
@@ -864,9 +886,19 @@ HTML_TEMPLATE = """
                             fill: false
                         },
                         {
+                            label: 'Load',
+                            data: [],
+                            borderColor: '#a78bfa',
+                            borderWidth: 1.5,
+                            borderDash: [2, 4],
+                            tension: 0.35,
+                            pointRadius: 0,
+                            fill: false
+                        },
+                        {
                             label: 'Target',
                             data: [],
-                            borderColor: '#64b5f6',
+                            borderColor: '#60a5fa',
                             borderWidth: 2,
                             borderDash: [4, 4],
                             pointRadius: 0,
@@ -875,7 +907,7 @@ HTML_TEMPLATE = """
                         {
                             label: 'Current',
                             data: [],
-                            borderColor: '#ff7043',
+                            borderColor: '#fb923c',
                             borderWidth: 1.8,
                             pointRadius: 0,
                             fill: false
@@ -883,7 +915,7 @@ HTML_TEMPLATE = """
                         {
                             label: 'Inverter limit',
                             data: [],
-                            borderColor: '#ef5350',
+                            borderColor: '#ef4444',
                             borderWidth: 1.5,
                             borderDash: [2, 6],
                             pointRadius: 0,
@@ -917,15 +949,15 @@ HTML_TEMPLATE = """
                         y: {
                             beginAtZero: true,
                             ticks: {
-                                color: 'rgba(255,255,255,0.7)',
+                                color: 'rgba(15,23,42,0.75)',
                                 callback(value) {
                                     return `${wattFormatter.format(value)} W`;
                                 }
                             },
-                            grid: { color: 'rgba(255,255,255,0.08)' }
+                            grid: { color: 'rgba(148, 163, 184, 0.25)' }
                         },
                         x: {
-                            ticks: { color: 'rgba(255,255,255,0.6)' },
+                            ticks: { color: 'rgba(107,114,128,0.9)' },
                             grid: { display: false }
                         }
                     }
@@ -960,24 +992,56 @@ HTML_TEMPLATE = """
             }
             const rawHistory = Array.isArray(energyMap.history) ? [...energyMap.history] : [];
             const trimmedHistory = rawHistory.slice(-ENERGY_HISTORY_LIMIT);
-            if (trimmedHistory.length === 0) {
-                const fallback = typeof energyMap.available_power === 'number' ? energyMap.available_power : 0;
-                trimmedHistory.push(fallback);
+            const normalized = trimmedHistory.map(sample => {
+                if (typeof sample === 'number') {
+                    return { available: sample };
+                }
+                return sample || {};
+            });
+            const chartWrapper = document.querySelector('.energy-chart-wrapper');
+            if (chartWrapper) {
+                chartWrapper.classList.toggle('chart-empty', normalized.length === 0);
             }
-            const labels = trimmedHistory.map((_, idx) => `${idx - trimmedHistory.length + 1}s`);
-            const baseLength = trimmedHistory.length;
-            const buildFlatSeries = (value) => Array.from({ length: baseLength }, () => (typeof value === 'number' ? value : null));
-            const pvSeries = buildFlatSeries(data.total_pv_power);
-            const targetSeries = buildFlatSeries(energyMap.target_watts);
-            const currentSeries = buildFlatSeries(energyMap.current_watts);
-            const inverterSeries = buildFlatSeries(energyMap.inverter_limit);
+            if (normalized.length === 0) {
+                chart.data.labels = [];
+                chart.data.datasets.forEach(dataset => { dataset.data = []; });
+                chart.update('none');
+                return;
+            }
+            const timestamps = normalized.map(sample => {
+                if (!sample.ts) {
+                    return null;
+                }
+                const parsed = Date.parse(sample.ts);
+                return Number.isNaN(parsed) ? null : parsed;
+            });
+            const latestTs = timestamps.reduce((acc, ts) => (ts !== null ? Math.max(acc, ts) : acc), Date.now());
+            const labels = normalized.map((_, idx) => {
+                const ts = timestamps[idx];
+                if (ts === null) {
+                    const fallback = idx - normalized.length + 1;
+                    return `${fallback}s`;
+                }
+                const delta = Math.round((ts - latestTs) / 1000);
+                if (delta === 0) {
+                    return '0s';
+                }
+                return `${delta}s`;
+            });
+            const availableSeries = normalized.map(sample => safeNumber(sample.available));
+            const pvSeries = normalized.map(sample => safeNumber(sample.pv));
+            const loadSeries = normalized.map(sample => safeNumber(sample.load));
+            const targetSeries = normalized.map(sample => safeNumber(sample.target));
+            const currentSeries = normalized.map(sample => safeNumber(sample.current));
+            const inverterSeries = normalized.map(() => safeNumber(energyMap.inverter_limit));
             chart.data.labels = labels;
-            chart.data.datasets[0].data = trimmedHistory;
+            chart.data.datasets[0].data = availableSeries;
             chart.data.datasets[1].data = pvSeries;
-            chart.data.datasets[2].data = targetSeries;
-            chart.data.datasets[3].data = currentSeries;
-            chart.data.datasets[4].data = inverterSeries;
-            const axisMax = computeAxisMax([trimmedHistory, pvSeries, targetSeries, currentSeries, inverterSeries]);
+            chart.data.datasets[2].data = loadSeries;
+            chart.data.datasets[3].data = targetSeries;
+            chart.data.datasets[4].data = currentSeries;
+            chart.data.datasets[5].data = inverterSeries;
+            const axisMax = computeAxisMax([availableSeries, pvSeries, loadSeries, targetSeries, currentSeries, inverterSeries]);
             if (chart.options?.scales?.y) {
                 chart.options.scales.y.suggestedMax = axisMax;
                 chart.options.scales.y.max = axisMax;

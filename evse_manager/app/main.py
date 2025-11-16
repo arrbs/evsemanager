@@ -86,6 +86,7 @@ class EVSEManager:
         self.startup_handshake_deadline = None
         self.switch_reapply_attempted = False
         self.inverter_limit_active_since = None
+        self.energy_history = []
         
         self.logger.info("="*60)
         self.logger.info("EVSE Manager initialized successfully")
@@ -411,6 +412,30 @@ class EVSEManager:
             self.inverter_limit_active_since = None
             return False
 
+        def _record_energy_trace(
+            self,
+            available_power: Optional[float],
+            pv_power: Optional[float],
+            load_power: Optional[float],
+            grid_power: Optional[float],
+            current_watts: Optional[float],
+            target_watts: Optional[float]
+        ):
+            """Store recent energy samples for UI visualization."""
+            sample = {
+                'ts': datetime.utcnow().isoformat(),
+                'available': available_power,
+                'pv': pv_power,
+                'load': load_power,
+                'grid': grid_power,
+                'current': current_watts,
+                'target': target_watts
+            }
+            self.energy_history.append(sample)
+            max_samples = max(60, int(180 / max(1, self.update_interval)))
+            if len(self.energy_history) > max_samples:
+                self.energy_history = self.energy_history[-max_samples:]
+
         min_current = self.charger.allowed_currents[0]
         if current_amps is None:
             current_amps = self.charger.get_current() or min_current
@@ -641,7 +666,6 @@ class EVSEManager:
         total_pv_power = _read_sensor(pv_entity)
         total_load_power = _read_sensor(load_entity)
         grid_power = _read_sensor(grid_entity)
-        power_history = self.power_manager.get_power_history(60)
         evse_steps = [
             {
                 'amps': amps,
@@ -651,6 +675,15 @@ class EVSEManager:
         ]
         current_watts = self.charger.amps_to_watts(current_amps)
         target_watts = self.charger.amps_to_watts(target_current) if target_current else None
+
+        self._record_energy_trace(
+            available_power,
+            total_pv_power,
+            total_load_power,
+            grid_power,
+            current_watts,
+            target_watts
+        )
 
         active_failed_reason = self._get_active_failed_reason()
 
@@ -791,7 +824,7 @@ class EVSEManager:
             'house_load_power': total_load_power,
             'grid_power': grid_power,
             'energy_map': {
-                'history': power_history,
+                'history': list(self.energy_history),
                 'evse_steps': evse_steps,
                 'current_watts': current_watts,
                 'target_watts': target_watts,
