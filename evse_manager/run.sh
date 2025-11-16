@@ -17,8 +17,12 @@ bashio::log.info "Mode: ${MODE}"
 
 # Start web UI in background
 bashio::log.info "Starting Web UI on port 5000..."
+ACCESS_LOG_ARGS="--access-logfile /dev/null"
+if bashio::config.true 'ui_access_logs'; then
+	ACCESS_LOG_ARGS="--access-logfile -"
+fi
 cd /app
-python3 -m gunicorn -w 1 -b 0.0.0.0:5000 web_ui:app --access-logfile - --error-logfile - &
+python3 -m gunicorn -w 1 -b 0.0.0.0:5000 web_ui:app ${ACCESS_LOG_ARGS} --error-logfile - &
 
 # Small delay to let web server start
 sleep 2

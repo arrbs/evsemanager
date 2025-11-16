@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template_string
@@ -422,15 +423,38 @@ def index():
     return render_template_string(HTML_TEMPLATE, fallback_json=json.dumps(FALLBACK_PAYLOAD))
 
 
+def _fallback_payload():
+    """Return a deep copy of the fallback payload so callers can mutate safely."""
+
+    return deepcopy(FALLBACK_PAYLOAD)
+
+
+def _load_ui_state_payload():
+    """Load the persisted UI state, tolerating empty or partially-written files."""
+
+    data_file = Path("/data/ui_state.json")
+    if not data_file.exists():
+        return _fallback_payload()
+    try:
+        raw = data_file.read_text(encoding="utf-8").strip()
+    except OSError as exc:  # file temporarily unavailable, etc.
+        app.logger.warning("Unable to read ui_state.json (%s); serving fallback", exc)
+        return _fallback_payload()
+    if not raw:
+        app.logger.warning("ui_state.json empty; serving fallback")
+        return _fallback_payload()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        app.logger.warning("ui_state.json invalid JSON (%s); serving fallback", exc)
+        return _fallback_payload()
+
+
 @app.route("/api/status")
 def api_status():
     """Return the latest controller snapshot or a deterministic fallback."""
 
-    data_file = Path("/data/ui_state.json")
-    if data_file.exists():
-        with data_file.open("r", encoding="utf-8") as handle:
-            return jsonify(json.load(handle))
-    return jsonify(FALLBACK_PAYLOAD)
+    return jsonify(_load_ui_state_payload())
 
 
 def run_server(host: str = "0.0.0.0", port: int = 5000) -> None:
