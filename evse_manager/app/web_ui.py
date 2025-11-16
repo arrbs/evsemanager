@@ -257,8 +257,9 @@ HTML_TEMPLATE = """
             padding: 14px;
         }
         .energy-metric .hero-value {
-            color: white;
+            color: rgba(15, 23, 42, 0.95);
             font-size: 28px;
+            font-weight: 700;
         }
         .energy-metric .metric-label { color: rgba(15, 23, 42, 0.9); font-weight: 700; font-size: 13px; }
         .energy-metric .metric-subtext { color: rgba(71, 85, 105, 0.75); font-size: 11px; }
