@@ -65,9 +65,16 @@ class DeterministicStateMachineTests(unittest.TestCase):
         self.assertIsNone(decision)
         self.assertEqual(self.machine.state.evse_step_index, 1)
 
-        # After cooldown, the controller can step up if excess allows it
+        # Cooldown expired but sensor latency window still active – hold position
         decision, _ = self.machine.tick(
             make_inputs(now_s=110.0, pv_power_w=8000.0, inverter_power_w=2500.0)
+        )
+        self.assertIsNone(decision)
+        self.assertEqual(self.machine.state.evse_step_index, 1)
+
+        # Once both cooldown and latency windows are satisfied, the controller can step up
+        decision, _ = self.machine.tick(
+            make_inputs(now_s=130.0, pv_power_w=8000.0, inverter_power_w=2500.0)
         )
         self.assertIsNotNone(decision)
         self.assertEqual(decision.current_command_amps, 8)

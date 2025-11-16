@@ -31,6 +31,7 @@ class ControllerConfig:
     inverter_margin_w: float = 500.0
     cooldown_s: float = 5.0
     waiting_timeout_s: float = 60.0
+    sensor_latency_s: float = 25.0
 
     @property
     def safe_inverter_max_w(self) -> float:
@@ -45,6 +46,7 @@ class ControllerState:
     evse_step_index: int = 0
     last_change_ts_s: float = 0.0
     waiting_since_ts_s: Optional[float] = None
+    pending_effect_ts_s: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,7 @@ class DerivedValues:
     cooldown_active: bool
     time_since_last_change: float
     waiting_timed_out: bool
+    effect_ready: bool
 
 
 @dataclass(frozen=True)
@@ -126,6 +129,13 @@ class DeterministicStateMachine:
         waiting_timed_out = False
         if self.state.waiting_since_ts_s is not None:
             waiting_timed_out = (inputs.now_s - self.state.waiting_since_ts_s) > self.config.waiting_timeout_s
+
+        effect_ready = True
+        pending_ts = self.state.pending_effect_ts_s
+        if pending_ts is not None:
+            effect_ready = (inputs.now_s - pending_ts) >= self.config.sensor_latency_s
+            if effect_ready:
+                self.state = replace(self.state, pending_effect_ts_s=None)
         return DerivedValues(
             region=target_region,
             ev_plugged=_ev_plugged(inputs.charger_status),
@@ -134,6 +144,7 @@ class DeterministicStateMachine:
             cooldown_active=cooldown_active,
             time_since_last_change=time_since_last_change,
             waiting_timed_out=waiting_timed_out,
+            effect_ready=effect_ready,
         )
 
     def _sync_mode_state(self, region: str, cooldown_active: bool) -> None:
@@ -173,7 +184,7 @@ class DeterministicStateMachine:
             return decision
         if derived.region == "MAIN":
             return self._main_ready_logic(inputs, derived)
-        return self._probe_ready_logic(inputs)
+        return self._probe_ready_logic(inputs, derived)
 
     def _update_waiting_timer(self, inputs: Inputs) -> None:
         status = inputs.charger_status.lower()
@@ -202,6 +213,7 @@ class DeterministicStateMachine:
             evse_step_index=0,
             last_change_ts_s=inputs.now_s,
             waiting_since_ts_s=waiting_ts,
+            pending_effect_ts_s=None,
         )
         soc_value = inputs.batt_soc_percent if inputs.batt_soc_percent is not None else 0.0
         return Decision(
@@ -246,7 +258,11 @@ class DeterministicStateMachine:
         if self.state.evse_step_index > 0 and derived.excess_w is not None:
             if self.state.evse_step_index < len(EVSE_STEPS_AMPS) - 1:
                 required = self._step_up_power(self.state.evse_step_index)
-                if derived.excess_w >= required and self._inverter_safe(inputs, self.state.evse_step_index):
+                if (
+                    derived.effect_ready
+                    and derived.excess_w >= required
+                    and self._inverter_safe(inputs, self.state.evse_step_index)
+                ):
                     return self._set_step(inputs, self.state.evse_step_index + 1, "main_step_up")
             # Hold region
             if derived.excess_w >= -self.config.small_discharge_margin_w:
@@ -258,14 +274,18 @@ class DeterministicStateMachine:
                 return self._set_step(inputs, next_index, label)
         return None
 
-    def _probe_ready_logic(self, inputs: Inputs) -> Optional[Decision]:
+    def _probe_ready_logic(self, inputs: Inputs, derived: DerivedValues) -> Optional[Decision]:
         batt_power = inputs.batt_power_w
         if batt_power is None:
             return None
         if self.state.evse_step_index == 0:
             return None
         if batt_power <= 0:
-            if self.state.evse_step_index < len(EVSE_STEPS_AMPS) - 1 and self._inverter_safe(inputs, self.state.evse_step_index):
+            if (
+                self.state.evse_step_index < len(EVSE_STEPS_AMPS) - 1
+                and derived.effect_ready
+                and self._inverter_safe(inputs, self.state.evse_step_index)
+            ):
                 return self._set_step(inputs, self.state.evse_step_index + 1, "probe_step_up")
             return None
         if 0 < batt_power <= self.config.probe_max_discharge_w:
@@ -286,17 +306,26 @@ class DeterministicStateMachine:
 
     def _set_step(self, inputs: Inputs, new_index: int, reason: str) -> Decision:
         new_index = max(0, min(new_index, len(EVSE_STEPS_AMPS) - 1))
+        old_index = self.state.evse_step_index
         target_mode = ModeState.OFF
         if new_index == 0:
             target_mode = ModeState.OFF
         else:
             region = self._region_for_soc(inputs.batt_soc_percent)
             target_mode = ModeState.MAIN_COOLDOWN if region == "MAIN" else ModeState.PROBE_COOLDOWN
+
+        pending_effect_ts_s = self.state.pending_effect_ts_s
+        if new_index > old_index:
+            pending_effect_ts_s = inputs.now_s
+        elif new_index < old_index or new_index == 0:
+            pending_effect_ts_s = None
+
         new_state = ControllerState(
             mode_state=target_mode,
             evse_step_index=new_index,
             last_change_ts_s=inputs.now_s,
             waiting_since_ts_s=self.state.waiting_since_ts_s,
+            pending_effect_ts_s=pending_effect_ts_s,
         )
         target_current = EVSE_STEPS_AMPS[new_index] if new_index > 0 else None
         switch_command = None

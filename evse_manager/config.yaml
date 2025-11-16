@@ -1,5 +1,5 @@
 name: EVSE Manager
-version: "1.0.0"
+version: "1.1.0"
 slug: evse_manager
 description: Deterministic EVSE control loop with neon web dashboard
 url: "https://github.com/arrbs/evsemanager"
@@ -43,6 +43,7 @@ options:
   inverter_margin_w: 500
   cooldown_s: 5
   waiting_timeout_s: 60
+  sensor_latency_s: 25
 
   log_level: "info"
 
@@ -66,5 +67,6 @@ schema:
   inverter_margin_w: int(100,2000)?
   cooldown_s: float(1,15)?
   waiting_timeout_s: float(10,600)?
+  sensor_latency_s: float(5,120)?
 
   log_level: list(debug|info|warning|error)?

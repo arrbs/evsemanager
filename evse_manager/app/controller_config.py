@@ -106,6 +106,7 @@ def load_runtime_config(path: Path = Path("/data/options.json")) -> RuntimeConfi
         inverter_margin_w=float(_extract("inverter_margin_w", 500)),
         cooldown_s=float(_extract("cooldown_s", 5)),
         waiting_timeout_s=float(_extract("waiting_timeout_s", 60)),
+        sensor_latency_s=float(_extract("sensor_latency_s", 25)),
     )
 
     tick_seconds = float(
