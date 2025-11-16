@@ -207,27 +207,28 @@ class BatteryCalculator(PowerCalculator):
                 pv_power = float(pv_power)
                 load_power = float(load_power)
                 
-                # House load includes the car's consumption
-                # For display: show excess available = PV - (Load - Car)
-                # For control: show current margin = PV - Load (including car)
-                if for_display and current_ev_watts > 0:
-                    # Subtract car from load to show true available excess
-                    house_only_load = load_power - current_ev_watts
-                    excess = pv_power - house_only_load
-                    self.logger.debug(
-                        f"Display: PV {pv_power:.0f}W - (Load {load_power:.0f}W - EV {current_ev_watts:.0f}W) = {excess:.0f}W"
-                    )
-                else:
-                    # Control decision: use total load including car
-                    excess = pv_power - load_power
-                    self.logger.debug(
-                        f"Control: PV {pv_power:.0f}W - Load {load_power:.0f}W = {excess:.0f}W margin"
-                    )
+                # House load includes the car's consumption but NOT battery charge/discharge
+                # True excess = PV - (Load - Car) + Battery charging power
+                # When battery is charging (negative normalized_power), that's excess we can use
+                # When battery is discharging (positive normalized_power), we're short on power
                 
-                # When battery is full (≥95%), allow moderate discharge
+                house_only_load = load_power - current_ev_watts if current_ev_watts > 0 else load_power
+                excess = pv_power - house_only_load
+                
+                # Add battery charging power as available (it's excess solar)
+                # Subtract battery discharging power (we're short on solar)
+                excess -= normalized_power
+                
+                self.logger.debug(
+                    f"PV {pv_power:.0f}W - House {house_only_load:.0f}W - Battery {normalized_power:.0f}W = {excess:.0f}W available"
+                )
+                
+                # When battery is at/near full (≥95%) and discharging, allow moderate discharge as bonus
                 if soc >= 95 and normalized_power > 0 and normalized_power <= self.target_discharge_max:
-                    excess += normalized_power
-                    self.logger.debug(f"Adding battery discharge {normalized_power:.0f}W")
+                    # Add it back as we're OK with this discharge
+                    bonus = min(normalized_power, self.target_discharge_max)
+                    excess += bonus
+                    self.logger.debug(f"Battery full, allowing {bonus:.0f}W discharge as bonus")
                 
                 return max(0, excess)
         
