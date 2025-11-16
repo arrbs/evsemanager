@@ -313,22 +313,23 @@ HTML_TEMPLATE = """
         .time-range-btn {
             padding: 6px 14px;
             border-radius: 6px;
-            border: 1px solid rgba(255, 255, 255, 0.2);
-            background: rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.7);
+            border: 1px solid rgba(148, 163, 184, 0.6);
+            background: rgba(15, 23, 42, 0.35);
+            color: rgba(248, 250, 252, 0.9);
             font-size: 12px;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s;
         }
         .time-range-btn:hover {
-            background: rgba(255, 255, 255, 0.15);
-            border-color: rgba(255, 255, 255, 0.3);
+            background: rgba(15, 23, 42, 0.5);
+            border-color: rgba(226, 232, 240, 0.9);
         }
         .time-range-btn.active {
-            background: rgba(34, 197, 94, 0.25);
-            border-color: rgba(34, 197, 94, 0.5);
-            color: #22c55e;
+            background: #d1fae5;
+            border-color: #22c55e;
+            color: #065f46;
+            box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.4);
         }
         @media (max-width: 768px) {
             .energy-bottom { flex-direction: column; }
@@ -985,8 +986,9 @@ HTML_TEMPLATE = """
                             display: true,
                             ticks: {
                                 display: true,
-                                color: 'rgba(15,23,42,0.9)',
-                                font: { size: 11, weight: '500' },
+                                color: 'rgba(248,250,252,0.92)',
+                                font: { size: 11, weight: '600' },
+                                padding: 6,
                                 callback(value) {
                                     if (value >= 1000) {
                                         return `${(value/1000).toFixed(1)} kW`;
@@ -997,18 +999,31 @@ HTML_TEMPLATE = """
                             grid: { 
                                 color: 'rgba(148, 163, 184, 0.25)',
                                 display: true
+                            },
+                            title: {
+                                display: true,
+                                text: 'Power (W)',
+                                color: 'rgba(226,232,240,0.95)',
+                                font: { size: 12, weight: '600' }
                             }
                         },
                         x: {
                             display: true,
                             ticks: { 
                                 display: true,
-                                color: 'rgba(107,114,128,0.9)',
+                                color: 'rgba(226,232,240,0.75)',
                                 maxRotation: 0,
                                 autoSkip: true,
-                                maxTicksLimit: 8
+                                maxTicksLimit: 8,
+                                padding: 8
                             },
-                            grid: { display: false }
+                            grid: { display: false },
+                            title: {
+                                display: true,
+                                text: 'Time (relative)',
+                                color: 'rgba(226,232,240,0.75)',
+                                font: { size: 12, weight: '600' }
+                            }
                         }
                     }
                 }
@@ -1066,31 +1081,30 @@ HTML_TEMPLATE = """
                 return Number.isNaN(parsed) ? null : parsed;
             });
             const latestTs = timestamps.reduce((acc, ts) => (ts !== null ? Math.max(acc, ts) : acc), Date.now());
+            const totalPoints = normalized.length;
+            const showEvery = Math.max(1, Math.floor(totalPoints / 8));
             const labels = normalized.map((_, idx) => {
                 const ts = timestamps[idx];
                 if (ts === null) {
                     return '';
                 }
-                const delta = Math.round((latestTs - ts) / 1000);
-                // Show time labels at regular intervals
-                const totalPoints = normalized.length;
-                const showEvery = Math.max(1, Math.floor(totalPoints / 8));
                 if (idx % showEvery !== 0 && idx !== totalPoints - 1) {
                     return '';
                 }
+                const delta = Math.max(0, Math.round((latestTs - ts) / 1000));
                 if (delta === 0) {
                     return 'now';
                 }
-                if (delta < 60) {
-                    return `${delta}s`;
+                if (delta >= 3600) {
+                    const hours = Math.floor(delta / 3600);
+                    const mins = Math.floor((delta % 3600) / 60);
+                    return mins ? `-${hours}h ${mins}m` : `-${hours}h`;
                 }
-                const mins = Math.floor(delta / 60);
-                if (mins < 60) {
-                    return `${mins}m`;
+                if (delta >= 60) {
+                    const mins = Math.floor(delta / 60);
+                    return `-${mins}m`;
                 }
-                const hours = Math.floor(mins / 60);
-                const remainMins = mins % 60;
-                return remainMins > 0 ? `${hours}h${remainMins}m` : `${hours}h`;
+                return `-${delta}s`;
             });
             const availableSeries = normalized.map(sample => safeNumber(sample.available));
             const pvSeries = normalized.map(sample => safeNumber(sample.pv));

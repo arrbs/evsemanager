@@ -422,7 +422,7 @@ class EVSEManager:
     ):
         """Store recent power samples so the UI can render history."""
         sample = {
-            'ts': datetime.utcnow().isoformat(),
+            'ts': datetime.utcnow().replace(microsecond=0).isoformat() + 'Z',
             'available': available_power,
             'pv': pv_power,
             'load': load_power,
