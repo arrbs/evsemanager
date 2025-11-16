@@ -174,6 +174,11 @@ HTML_TEMPLATE = """
             font-weight: 600;
             color: rgba(15, 23, 42, 0.55);
             letter-spacing: 0.05em;
+            animation: pulse-opacity 2s ease-in-out infinite;
+        }
+        @keyframes pulse-opacity {
+            0%, 100% { opacity: 0.5; }
+            50% { opacity: 1; }
         }
         .energy-header {
             display: flex;
@@ -203,6 +208,8 @@ HTML_TEMPLATE = """
             background: rgba(15, 23, 42, 0.4);
             border-color: rgba(255, 255, 255, 0.25);
         }
+        .energy-chip.grid-import { background: rgba(239, 68, 68, 0.25); border-color: rgba(239, 68, 68, 0.5); }
+        .energy-chip.grid-export { background: rgba(34, 197, 94, 0.25); border-color: rgba(34, 197, 94, 0.5); }
         .energy-legend {
             margin-top: 16px;
             display: flex;
@@ -1097,6 +1104,14 @@ HTML_TEMPLATE = """
             const gridChip = document.getElementById('grid-chip');
             if (gridChip) {
                 gridChip.textContent = formatSignedWatts(data.grid_power);
+                gridChip.classList.remove('grid-import', 'grid-export');
+                if (typeof data.grid_power === 'number') {
+                    if (data.grid_power > 50) {
+                        gridChip.classList.add('grid-import');
+                    } else if (data.grid_power < -50) {
+                        gridChip.classList.add('grid-export');
+                    }
+                }
             }
             const pvPill = document.getElementById('pv-pill');
             if (pvPill) {
