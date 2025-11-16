@@ -432,13 +432,20 @@ class PowerManager:
         if available_power is None:
             return None
         
+        # In aggressive discharge mode, always try to step up to discharge battery
+        in_aggressive = self.is_aggressive_discharge_mode()
+        
         # Calculate power difference
         power_diff = available_power - current_watts
         
         # Apply hysteresis - only adjust if change is significant
+        # BUT in aggressive mode, always allow increases to discharge battery
         if abs(power_diff) < self.hysteresis:
-            self.logger.info(f"Power diff {power_diff:.1f}W within hysteresis {self.hysteresis}W (available={available_power:.1f}W, current={current_watts:.1f}W)")
-            return None
+            if not in_aggressive or power_diff <= 0:
+                self.logger.info(f"Power diff {power_diff:.1f}W within hysteresis {self.hysteresis}W (available={available_power:.1f}W, current={current_watts:.1f}W)")
+                return None
+            else:
+                self.logger.info(f"Aggressive mode: stepping up despite small diff {power_diff:.1f}W to discharge battery")
         
         # Calculate target power
         target_watts = current_watts + power_diff
@@ -524,7 +531,7 @@ class PowerManager:
         in_aggressive = soc >= 95 and normalized < 0
         
         if in_aggressive:
-            self.logger.debug(f"Aggressive discharge mode: SOC {soc:.1f}%, battery charging {abs(normalized):.0f}W")
+            self.logger.info(f"⚡ AGGRESSIVE MODE: SOC {soc:.1f}%, battery charging {abs(normalized):.0f}W - bypassing all power limits")
         
         return in_aggressive
     
@@ -542,7 +549,7 @@ class PowerManager:
         # In aggressive discharge mode (SOC≥95%, battery charging), never stop
         # Battery will handle any power deficit
         if self.is_aggressive_discharge_mode():
-            self.logger.debug("Aggressive mode: bypassing power checks, battery will handle deficit")
+            self.logger.info("⚡ Aggressive mode: never stop charging, battery will handle deficit")
             return False
         
         # Get current EV load to calculate total available
