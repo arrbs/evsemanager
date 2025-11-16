@@ -601,6 +601,7 @@ class EVSEManager:
         power_entity = sensors.get('battery_power_entity')
         battery_priority_active = self.check_battery_priority()
         battery_info = None
+        battery_priority_soc_threshold = sensors.get('battery_priority_soc', 80)
 
         if soc_entity and power_entity:
             try:
@@ -622,7 +623,8 @@ class EVSEManager:
                         'power': power,
                         'direction': direction,
                         'priority_active': battery_priority_active,
-                        'manual_override': self.battery_priority_override
+                        'manual_override': self.battery_priority_override,
+                        'priority_threshold': battery_priority_soc_threshold
                     }
             except Exception as exc:  # noqa: BLE001
                 self.logger.debug(f"Unable to capture battery telemetry: {exc}")
@@ -692,7 +694,7 @@ class EVSEManager:
                     'battery_priority': (
                         'waiting_for_battery',
                         'Holding for battery',
-                        'Battery priority is delaying EV charging until the house battery recovers.'
+                        f'Battery SOC is {battery_info["soc"]:.1f}% (need {battery_priority_soc_threshold}%) — waiting for house battery to recover before starting EV charging.' if battery_info else 'Battery priority is delaying EV charging until the house battery recovers.'
                     ),
                     'battery_priority_override': (
                         'manual_priority',

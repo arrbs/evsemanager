@@ -690,7 +690,12 @@ HTML_TEMPLATE = """
                 if (data.auto_pause_reason === 'insufficient_power') {
                     noteText = 'Auto paused: not enough solar to reach minimum charger current.';
                 } else if (data.auto_pause_reason === 'battery_priority') {
-                    noteText = 'Battery priority is holding charging until SOC recovers.';
+                    const battInfo = data.battery;
+                    if (battInfo && battInfo.priority_threshold) {
+                        noteText = `Battery SOC is ${battInfo.soc.toFixed(1)}% — waiting until it reaches ${battInfo.priority_threshold}% before EV charging starts.`;
+                    } else {
+                        noteText = 'Battery priority is holding charging until SOC recovers.';
+                    }
                 } else if (data.auto_pause_reason === 'battery_priority_override') {
                     noteText = 'You turned on battery priority, so EV charging will stay paused.';
                 } else if (data.auto_pause_reason === 'inverter_limit') {
