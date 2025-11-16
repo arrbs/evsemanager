@@ -498,6 +498,36 @@ class PowerManager:
             self.calculator.priority_soc = value
             self.logger.info(f"Battery priority SOC updated to {value}%")
     
+    def is_aggressive_discharge_mode(self) -> bool:
+        """Check if we're in aggressive mode: SOC≥95% and battery charging.
+        
+        In this mode, ignore power calculations - battery will handle any deficit.
+        """
+        if self.method != 'battery':
+            return False
+        
+        battery_calc = self.calculator
+        if not hasattr(battery_calc, 'battery_soc_entity'):
+            return False
+        
+        soc = self.ha_api.get_state(battery_calc.battery_soc_entity)
+        battery_power = self.ha_api.get_state(battery_calc.battery_power_entity)
+        
+        if soc is None or battery_power is None:
+            return False
+        
+        soc = float(soc)
+        battery_power = float(battery_power)
+        normalized = battery_calc._normalize_battery_power(battery_power)
+        
+        # SOC≥95% and battery is charging (negative normalized power)
+        in_aggressive = soc >= 95 and normalized < 0
+        
+        if in_aggressive:
+            self.logger.debug(f"Aggressive discharge mode: SOC {soc:.1f}%, battery charging {abs(normalized):.0f}W")
+        
+        return in_aggressive
+    
     def should_stop_charging(self, charger_controller) -> bool:
         """
         Determine if charging should be stopped entirely.
@@ -509,6 +539,12 @@ class PowerManager:
         Returns:
             True if charging should be stopped
         """
+        # In aggressive discharge mode (SOC≥95%, battery charging), never stop
+        # Battery will handle any power deficit
+        if self.is_aggressive_discharge_mode():
+            self.logger.debug("Aggressive mode: bypassing power checks, battery will handle deficit")
+            return False
+        
         # Get current EV load to calculate total available
         current_amps = charger_controller.get_current() or 0
         current_watts = charger_controller.amps_to_watts(current_amps)

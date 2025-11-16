@@ -253,6 +253,11 @@ class EVSEManager:
         
         # In auto mode, check if we have enough power
         if self.mode == 'auto':
+            # In aggressive discharge mode (SOC≥95%, battery charging), always allow start
+            if self.power_manager.is_aggressive_discharge_mode():
+                self.logger.info("Aggressive discharge mode: starting charge, battery will handle any deficit")
+                return True
+            
             # When checking if we can start, EV load is 0
             available_power = self.power_manager.get_available_power(current_ev_load=0)
             min_power = self.charger.get_min_power()
