@@ -44,6 +44,19 @@ class ControlService:
             self.tick_seconds,
             self.runtime_config.controller.inverter_limit_w,
         )
+        
+        # Synchronize with any existing charging session
+        try:
+            startup_inputs = self.adapter.read_inputs(time.monotonic())
+            self.machine.sync_with_charger(startup_inputs)
+            if self.machine.state.evse_step_index > 0:
+                self.logger.info(
+                    "Detected existing charging session: %sA (step %s), taking ownership",
+                    EVSE_STEPS_AMPS[self.machine.state.evse_step_index],
+                    self.machine.state.evse_step_index,
+                )
+        except Exception:
+            self.logger.exception("Failed to sync with charger state on startup")
 
     def run_forever(self) -> None:
         while True:
@@ -105,12 +118,15 @@ class ControlService:
         payload = {
             "mode": "auto",
             "status": "active" if current_index > 0 else "idle",
+            "mode_state": self.machine.state.mode_state.value,
+            "region": derived.region,
             "charger_status": inputs.charger_status,
             "current_amps": current_amps,
             "target_current": target_amps,
             "available_power": available_power,
             "charging_power": current_watts,
             "inverter_power": inputs.inverter_power_w,
+            "pv_power_w": inputs.pv_power_w,
             "battery": self._battery_payload(inputs),
             "battery_priority_soc": self.runtime_config.controller.soc_main_max,
             "limiting_factors": self._limiting_factors(inputs, derived),

@@ -104,6 +104,52 @@ class DeterministicStateMachine:
         self.config = config
         self.state = ControllerState()
 
+    def sync_with_charger(self, inputs: Inputs) -> None:
+        """Synchronize FSM state with actual charger state on startup.
+        
+        If the charger is already charging when the add-on starts, this method
+        detects the current amperage and initializes the FSM to match, allowing
+        it to take ownership of the existing session.
+        """
+        # Only sync if we're in the initial OFF state
+        if self.state.evse_step_index != 0:
+            return
+        
+        # Check if charger is actually charging
+        status = inputs.charger_status.lower()
+        if status not in {"charging", "connected"}:
+            return
+        
+        # Try to match current amperage to a step
+        if inputs.charger_current_a is None or inputs.charger_current_a < 1:
+            return
+        
+        # Find the closest step index for the current amperage
+        current_amps = inputs.charger_current_a
+        best_index = 0
+        min_diff = float('inf')
+        
+        for idx, step_amps in enumerate(EVSE_STEPS_AMPS):
+            if idx == 0:  # Skip the OFF step
+                continue
+            diff = abs(step_amps - current_amps)
+            if diff < min_diff:
+                min_diff = diff
+                best_index = idx
+        
+        # Only sync if we found a reasonable match (within 3A)
+        if best_index > 0 and min_diff <= 3:
+            region = self._region_for_soc(inputs.batt_soc_percent)
+            mode_state = ModeState.MAIN_READY if region == "MAIN" else ModeState.PROBE_READY
+            
+            self.state = ControllerState(
+                mode_state=mode_state,
+                evse_step_index=best_index,
+                last_change_ts_s=inputs.now_s,
+                waiting_since_ts_s=None,
+                pending_effect_ts_s=None,
+            )
+
     def tick(self, inputs: Inputs) -> Tuple[Optional[Decision], DerivedValues]:
         derived = self._derive(inputs)
         self._sync_mode_state(derived.region, derived.cooldown_active)

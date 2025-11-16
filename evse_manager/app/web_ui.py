@@ -103,6 +103,25 @@ HTML_TEMPLATE = """
             letter-spacing: 0.3em;
             font-size: 12px;
         }
+        .mode-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            border-radius: 999px;
+            font-size: 11px;
+            letter-spacing: 0.3em;
+            background: rgba(93,224,236,0.15);
+            border: 1px solid rgba(93,224,236,0.5);
+            color: var(--lcars-cyan);
+            margin-bottom: 18px;
+            text-transform: uppercase;
+        }
+        .mode-chip.probe {
+            background: rgba(240,76,124,0.15);
+            border-color: rgba(240,76,124,0.6);
+            color: var(--lcars-pink);
+        }
         .lcars-grid {
             display: grid;
             grid-template-columns: minmax(240px, 280px) minmax(320px, 1fr) minmax(260px, 320px);
@@ -135,6 +154,10 @@ HTML_TEMPLATE = """
         .segment-subtext {
             font-size: 13px;
             color: var(--lcars-muted);
+            min-height: 18px;
+        }
+        .segment-foot {
+            margin-top: 10px;
         }
         .lcars-rail {
             display: flex;
@@ -162,6 +185,32 @@ HTML_TEMPLATE = """
             border-color: rgba(0,0,0,0.2);
         }
         .rail-step.target {
+        .auto-status-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 10px;
+        }
+        .status-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.15);
+            letter-spacing: 0.25em;
+            font-size: 11px;
+            text-transform: uppercase;
+            background: rgba(255,255,255,0.05);
+        }
+        .status-chip.active {
+            border-color: var(--lcars-amber);
+            color: var(--lcars-amber);
+        }
+        .status-chip.alert {
+            border-color: var(--lcars-pink);
+            color: var(--lcars-pink);
+        }
             border-color: var(--lcars-pink);
         }
         .rail-step small {
@@ -211,9 +260,12 @@ HTML_TEMPLATE = """
         }
         .metric strong {
             display: block;
-            font-size: 24px;
+            font-size: clamp(16px, 2.8vw, 26px);
             margin-top: 6px;
             letter-spacing: 0.15em;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .auto-help {
             margin-top: 12px;
@@ -253,6 +305,9 @@ HTML_TEMPLATE = """
             letter-spacing: 0.2em;
             font-size: 11px;
             text-transform: uppercase;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         .constraint.alert {
             border-color: var(--lcars-pink);
@@ -262,6 +317,53 @@ HTML_TEMPLATE = """
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
             gap: 10px;
+        }
+        .battery-aura {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+        .battery-beacon {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.2);
+            box-shadow: 0 0 12px rgba(255,255,255,0.15);
+            position: relative;
+            transition: box-shadow 0.3s ease, background 0.3s ease, border-color 0.3s ease;
+        }
+        .battery-beacon::after {
+            content: '';
+            position: absolute;
+            inset: 6px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+        }
+        .battery-beacon.charging {
+            background: rgba(93,224,236,0.2);
+            border-color: #5de0ec;
+            box-shadow: 0 0 20px rgba(93,224,236,0.45);
+        }
+        .battery-beacon.discharging {
+            background: rgba(240,76,124,0.18);
+            border-color: var(--lcars-pink);
+            box-shadow: 0 0 20px rgba(240,76,124,0.4);
+        }
+        .battery-beacon-label {
+            display: flex;
+            flex-direction: column;
+        }
+        .battery-beacon-label span {
+            display: block;
+            font-size: 9px;
+            letter-spacing: 0.35em;
+            color: var(--lcars-muted);
+        }
+        .battery-beacon-label strong {
+            letter-spacing: 0.25em;
+            font-size: 16px;
         }
         canvas { width: 100% !important; height: 220px !important; }
         @media (max-width: 1100px) {
@@ -279,8 +381,14 @@ HTML_TEMPLATE = """
             <section class=\"lcars-stack\">
                 <div class=\"stack-segment\">
                     <div class=\"segment-title\">MODE</div>
-                    <div class=\"segment-value\" id=\"mode-value\">AUTO</div>
-                    <div class=\"segment-subtext\">Deterministic FSM</div>
+                    <div class=\"segment-value\">
+                        <span id=\"mode-value\">AUTO</span>
+                        <span class=\"mode-chip\" id=\"mode-region-chip\">MAIN</span>
+                    </div>
+                    <div class=\"segment-subtext\" id=\"mode-subtext\">Deterministic FSM</div>
+                    <div class=\"segment-foot\">
+                        <span class=\"mode-chip\" id=\"mode-state-chip\">IDLE</span>
+                    </div>
                 </div>
                 <div class=\"stack-segment\">
                     <div class=\"segment-title\">STATE</div>
@@ -307,7 +415,7 @@ HTML_TEMPLATE = """
                         <div class=\"metric\"><span>AVAILABLE</span><strong id=\"available-chip\">-- W</strong></div>
                         <div class=\"metric\"><span>PV ARRAY</span><strong id=\"pv-chip\">-- W</strong></div>
                         <div class=\"metric\"><span>INVERTER</span><strong id=\"load-chip\">-- W</strong></div>
-                        <div class=\"metric\"><span>CHARGING</span><strong id=\"charging-chip\">-- W</strong></div>
+                        <div class=\"metric\"><span>EV DRAW</span><strong id=\"ev-draw-chip\">-- W</strong></div>
                     </div>
                 </article>
                 <article class=\"panel\">
@@ -318,9 +426,9 @@ HTML_TEMPLATE = """
             <section class=\"lcars-side\">
                 <article class=\"panel\">
                     <div class=\"panel-title\">AUTO LOGIC</div>
-                    <div class=\"metric-board\">
-                        <div class=\"metric\"><span>STATUS</span><strong id=\"status-indicator\">IDLE</strong></div>
-                        <div class=\"metric\"><span>AVAILABLE</span><strong id=\"auto-state-label\">--</strong></div>
+                    <div class=\"auto-status-row\">
+                        <span class=\"status-chip\" id=\"fsm-status-chip\">FSM | IDLE</span>
+                        <span class=\"status-chip\" id=\"evse-status-chip\">EVSE | UNKNOWN</span>
                     </div>
                     <p class=\"auto-help\" id=\"auto-help\">State narrative will appear here.</p>
                 </article>
@@ -330,11 +438,17 @@ HTML_TEMPLATE = """
                 </article>
                 <article class=\"panel\">
                     <div class=\"panel-title\">BATTERY + GUARD</div>
-                    <div class=\"battery-grid\">
-                        <div class=\"metric\"><span>SOC</span><strong id=\"battery-soc\">-- %</strong></div>
-                        <div class=\"metric\"><span>FLOW</span><strong id=\"battery-direction\">--</strong></div>
-                        <div class=\"metric\"><span>POWER</span><strong id=\"battery-power\">-- W</strong></div>
-                        <div class=\"metric\"><span>GUARD</span><strong id=\"battery-guard\">-- %</strong></div>
+                    <div class=\"battery-aura\">
+                        <div class=\"battery-beacon\" id=\"battery-beacon\"></div>
+                        <div class=\"battery-beacon-label\">
+                            <span>FLOW</span>
+                            <strong id=\"battery-beacon-label\">IDLE</strong>
+                        </div>
+                    </div>
+                    <div class="battery-grid">
+                        <div class="metric"><span>SOC</span><strong id="battery-soc">-- %</strong></div>
+                        <div class="metric"><span>POWER</span><strong id="battery-power">-- W</strong></div>
+                        <div class="metric"><span>GUARD</span><strong id="battery-guard">-- %</strong></div>
                     </div>
                 </article>
             </section>
@@ -357,15 +471,32 @@ HTML_TEMPLATE = """
                     datasets: [
                         { label: 'Available', data: [], borderColor: '#f7a21c', backgroundColor: 'rgba(247,162,28,0.15)', fill: true, tension: 0.35 },
                         { label: 'PV', data: [], borderColor: '#5de0ec', borderDash: [8,4], tension: 0.35 },
-                        { label: 'Charging', data: [], borderColor: '#f04c7c', tension: 0.35 }
+                        { label: 'EV Draw', data: [], borderColor: '#f04c7c', tension: 0.35 }
                     ]
                 },
                 options: {
                     animation: false,
-                    plugins: { legend: { labels: { color: 'rgba(244,242,255,0.8)', font: { family: 'Rajdhani' } } } },
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { 
+                        legend: { 
+                            labels: { 
+                                color: 'rgba(244,242,255,0.8)', 
+                                font: { family: 'Rajdhani', size: 11 }
+                            } 
+                        } 
+                    },
                     scales: {
-                        x: { ticks: { color: 'rgba(244,242,255,0.6)' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                        y: { ticks: { color: 'rgba(244,242,255,0.6)' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                        x: {
+                            display: false
+                        },
+                        y: { 
+                            ticks: { 
+                                color: 'rgba(244,242,255,0.6)',
+                                font: { size: 10 }
+                            }, 
+                            grid: { color: 'rgba(255,255,255,0.05)' } 
+                        }
                     }
                 }
             });
@@ -440,7 +571,8 @@ HTML_TEMPLATE = """
 
         function pumpChart(history, availablePower, pvPower, chargingPower) {
             if (!energyChart) return;
-            const labels = history.map(sample => sample.ts || '');
+            // Use empty strings as labels since x-axis is hidden
+            const labels = history.map(() => '');
             energyChart.data.labels = labels;
             energyChart.data.datasets[0].data = history.map(sample => sample.available ?? availablePower ?? null);
             energyChart.data.datasets[1].data = history.map(sample => sample.pv ?? pvPower ?? null);
@@ -457,9 +589,51 @@ HTML_TEMPLATE = """
             document.getElementById('limiter-label').textContent = (data.limiting_factors?.[0] || 'Clear channel').replace(/_/g, ' ');
             document.getElementById('current-amps').textContent = `${data.current_amps ?? 0} A`;
             document.getElementById('target-amps').textContent = `${data.target_current ?? 0} A`;
-            document.getElementById('status-indicator').textContent = (data.status || 'idle').toUpperCase();
-            document.getElementById('auto-state-label').textContent = data.auto_state_label || '--';
             document.getElementById('auto-help').textContent = data.auto_state_help || 'No guidance available.';
+            updateModeChips(data);
+            updateStatusChips(data);
+        }
+
+        function updateModeChips(data) {
+            const regionChip = document.getElementById('mode-region-chip');
+            const modeStateChip = document.getElementById('mode-state-chip');
+            const modeSubtext = document.getElementById('mode-subtext');
+            if (regionChip) {
+                const region = (data.region || 'main').toUpperCase();
+                regionChip.textContent = region;
+                regionChip.classList.toggle('probe', region === 'PROBE');
+            }
+            if (modeStateChip) {
+                const state = (data.mode_state || '--').replace(/_/g, ' ').toUpperCase();
+                modeStateChip.textContent = state;
+            }
+            if (modeSubtext) {
+                modeSubtext.textContent = data.mode_state ? data.mode_state.replace(/_/g, ' ').toUpperCase() : 'DETERMINISTIC FSM';
+            }
+        }
+
+        function updateStatusChips(data) {
+            const fsmChip = document.getElementById('fsm-status-chip');
+            if (fsmChip) {
+                fsmChip.textContent = `FSM | ${(data.auto_state_label || '--').toUpperCase()}`;
+                fsmChip.classList.remove('active', 'alert');
+                if ((data.auto_state || '').includes('charging')) {
+                    fsmChip.classList.add('active');
+                }
+            }
+            const evseChip = document.getElementById('evse-status-chip');
+            if (evseChip) {
+                const evseState = (data.charger_status || 'unknown').toUpperCase();
+                evseChip.textContent = `EVSE | ${evseState}`;
+                evseChip.classList.remove('active', 'alert');
+                const normalized = evseState.toLowerCase();
+                if (/(ready|charging|active)/.test(normalized)) {
+                    evseChip.classList.add('active');
+                }
+                if (/(fault|error|unavailable)/.test(normalized)) {
+                    evseChip.classList.add('alert');
+                }
+            }
         }
 
         function updateEnergyChips(data) {
@@ -467,14 +641,28 @@ HTML_TEMPLATE = """
             const pv = data.pv_power_w ?? data.total_pv_power;
             document.getElementById('pv-chip').textContent = fmt(pv, ' W');
             document.getElementById('load-chip').textContent = fmt(data.inverter_power, ' W');
-            document.getElementById('charging-chip').textContent = fmt(data.charging_power, ' W');
+            document.getElementById('ev-draw-chip').textContent = fmt(data.charging_power, ' W');
         }
 
         function updateBattery(data) {
             const battery = data.battery || {};
+            const beacon = document.getElementById('battery-beacon');
+            const beaconLabel = document.getElementById('battery-beacon-label');
+            const direction = (battery.direction || 'idle').toLowerCase();
+            if (beacon) {
+                beacon.classList.remove('charging', 'discharging');
+                if (direction === 'charging') {
+                    beacon.classList.add('charging');
+                } else if (direction === 'discharging') {
+                    beacon.classList.add('discharging');
+                }
+            }
+            if (beaconLabel) {
+                const label = direction === 'charging' ? 'IN' : direction === 'discharging' ? 'OUT' : 'IDLE';
+                beaconLabel.textContent = label;
+            }
             document.getElementById('battery-soc').textContent = battery.soc != null ? `${battery.soc.toFixed(1)} %` : '-- %';
             document.getElementById('battery-power').textContent = battery.power != null ? `${Math.round(battery.power)} W` : '-- W';
-            document.getElementById('battery-direction').textContent = (battery.direction || '--').toUpperCase();
             document.getElementById('battery-guard').textContent = `${data.battery_priority_soc ?? '--'} %`;
         }
 
