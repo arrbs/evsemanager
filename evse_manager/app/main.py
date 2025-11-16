@@ -430,6 +430,47 @@ class EVSEManager:
         if len(self.energy_history) > max_samples:
             self.energy_history = self.energy_history[-max_samples:]
 
+    def _record_energy_trace_from_current_state(self):
+        """Record energy trace using current system state."""
+        try:
+            # Get current power readings
+            available_power = self.power_manager.get_available_power()
+            
+            sensors = self.config.get('sensors', {})
+            pv_entity = sensors.get('total_pv_entity')
+            load_entity = sensors.get('total_load_entity')
+            grid_entity = sensors.get('grid_power_entity')
+            
+            def _read_sensor(entity):
+                if not entity:
+                    return None
+                try:
+                    raw = self.ha_api.get_state(entity)
+                    return float(raw) if raw is not None else None
+                except Exception:
+                    return None
+            
+            total_pv_power = _read_sensor(pv_entity)
+            total_load_power = _read_sensor(load_entity)
+            grid_power = _read_sensor(grid_entity)
+            
+            # Get current and target
+            current_amps = self.charger.get_current() or 0
+            target_current = self.power_manager.commanded_current or current_amps
+            current_watts = self.charger.amps_to_watts(current_amps)
+            target_watts = self.charger.amps_to_watts(target_current) if target_current else None
+            
+            self._record_energy_trace(
+                available_power,
+                total_pv_power,
+                total_load_power,
+                grid_power,
+                current_watts,
+                target_watts
+            )
+        except Exception as e:
+            self.logger.debug(f"Error recording energy trace: {e}")
+
     def _handle_inverter_limit_response(self, current_amps: Optional[float]) -> bool:
         """React immediately when the inverter limit is reached."""
         if not self.power_manager.check_inverter_limit():
@@ -1010,6 +1051,9 @@ class EVSEManager:
                 
                 # Update session data
                 self.update_session_data()
+            
+            # Always record energy trace on every cycle for smooth graphs
+            self._record_energy_trace_from_current_state()
             
             # Publish status periodically (every 10 seconds)
             if self.entity_publisher and (self.last_status_publish is None or \
