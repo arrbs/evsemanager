@@ -305,6 +305,14 @@ class DeterministicStateMachine:
         # Determine if we're in conservative mode (SOC below guard threshold)
         conservative_mode = self._is_conservative_mode(inputs.batt_soc_percent)
         
+        # If in conservative mode but can't determine excess, use battery power as fallback
+        if conservative_mode and self.state.evse_step_index > 0:
+            if derived.excess_w is None and inputs.batt_power_w is not None:
+                # If battery is discharging in conservative mode, step down
+                if inputs.batt_power_w > 50:  # Discharging more than 50W
+                    next_index = max(0, self.state.evse_step_index - 1)
+                    return self._set_step(inputs, next_index, "main_conservative_batt_discharge")
+        
         # Step-up path
         if self.state.evse_step_index > 0 and derived.excess_w is not None:
             if self.state.evse_step_index < len(EVSE_STEPS_AMPS) - 1:

@@ -75,6 +75,21 @@ class ControlService:
         if decision:
             self._log_transition(prev_state, decision, inputs)
             self.adapter.apply_decision(decision)
+        else:
+            # Log when in conservative mode but not taking action
+            if (
+                self.machine.state.evse_step_index > 0
+                and inputs.batt_soc_percent is not None
+                and inputs.batt_soc_percent < self.runtime_config.controller.soc_conservative_below
+                and inputs.batt_power_w is not None
+                and inputs.batt_power_w > 50
+            ):
+                self.logger.debug(
+                    "Conservative mode: SOC=%.1f%%, batt_discharge=%.0fW, excess=%s, no decision",
+                    inputs.batt_soc_percent,
+                    inputs.batt_power_w,
+                    derived.excess_w,
+                )
         self._persist_ui_state(inputs, derived, decision)
 
     # ------------------------------------------------------------------
@@ -112,10 +127,11 @@ class ControlService:
         ui_pv_display = inputs.pv_power_w
         
         timestamp = datetime.now(timezone.utc).isoformat()
+        # Use UI values for history display on graph
         self._append_history(
             timestamp,
-            available_power,
-            inputs.pv_power_w,
+            ui_available_for_ev,
+            ui_pv_display,
             inputs.inverter_power_w,
             current_watts,
             target_watts,
@@ -177,12 +193,17 @@ class ControlService:
 
     def _ui_available_for_ev(self, inputs: Inputs, current_evse_watts: float, region: str) -> Optional[float]:
         """Calculate UI display value for 'Available for EV'."""
-        # When SOC >= 95% (PROBE region), return None to display "Probing" or "Unknown"
+        # When SOC >= 95% (PROBE region), return None to display "Probing"
         if region == "PROBE":
             return None
         
         # When SOC < 95% (MAIN region): Total PV - (Inverter - Current EVSE)
         if inputs.pv_power_w is None or inputs.inverter_power_w is None:
+            self.logger.debug(
+                "Cannot calculate UI available power: pv=%s, inverter=%s",
+                inputs.pv_power_w,
+                inputs.inverter_power_w,
+            )
             return None
         
         # Available = PV - (Inverter - EVSE) = PV - Inverter + EVSE
