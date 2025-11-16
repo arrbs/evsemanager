@@ -205,29 +205,30 @@ class BatteryCalculator(PowerCalculator):
                 
                 if for_display:
                     # VISUALIZATION LOGIC
-                    # Subtract the live EV draw so the chart mirrors the house-only load trace
-                    house_only_load = load_power
-                    if current_ev_watts and load_power is not None:
-                        house_only_load = max(0.0, load_power - current_ev_watts)
-                    
-                    # Check if battery is discharging (no real excess solar)
-                    if normalized_power > 0:
-                        # Battery is discharging = deficit, not excess
+                    # When SOC ≥ 95%, show 0W to indicate we're in battery discharge mode
+                    if soc >= 95:
                         available = 0.0
                         self.logger.debug(
-                            f"Display: Battery discharging {normalized_power:.0f}W - no solar excess available"
-                        )
-                    elif soc >= 95:
-                        # High SOC and battery not discharging
-                        available = pv_power - house_only_load
-                        self.logger.debug(
-                            f"Display (SOC≥95%): PV {pv_power:.0f}W - House {house_only_load:.0f}W = {available:.0f}W"
+                            f"Display (SOC≥95%): Showing 0W - in battery discharge mode"
                         )
                     else:
-                        available = pv_power - house_only_load
-                        self.logger.debug(
-                            f"Display (SOC<95%): PV {pv_power:.0f}W - House {house_only_load:.0f}W = {available:.0f}W"
-                        )
+                        # Below 95%: show actual solar excess (PV - House only)
+                        house_only_load = load_power
+                        if current_ev_watts and load_power is not None:
+                            house_only_load = max(0.0, load_power - current_ev_watts)
+                        
+                        # Check if battery is discharging (no real excess solar)
+                        if normalized_power > 0:
+                            # Battery is discharging = deficit, not excess
+                            available = 0.0
+                            self.logger.debug(
+                                f"Display: Battery discharging {normalized_power:.0f}W - no solar excess available"
+                            )
+                        else:
+                            available = pv_power - house_only_load
+                            self.logger.debug(
+                                f"Display (SOC<95%): PV {pv_power:.0f}W - House {house_only_load:.0f}W = {available:.0f}W"
+                            )
                 else:
                     # CONTROL DECISION LOGIC
                     if soc >= 95:
