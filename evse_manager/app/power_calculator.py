@@ -334,23 +334,24 @@ class PowerManager:
     def get_available_power(self, voltage: float = 230, current_ev_load: float = 0, 
                            for_display: bool = False) -> Optional[float]:
         """
-        Get current available power for EV charging.
+        Get available excess solar power for EV charging.
         
-        The key insight: if the EV is already drawing power, we need to add that back
-        to determine the TOTAL power budget available for the EV. For example:
-        - Battery charging at 1.7 kW (raw available)
-        - EV currently drawing 1.3 kW
-        - Total available for EV = 1.7 + 1.3 = 3.0 kW
+        Returns: PV - (House Load - Current EV) = Excess available for EV
         
-        This prevents the system from thinking there's "insufficient power" when
-        the EV is already successfully charging.
+        This is the total power budget the EV can use without discharging battery.
+        
+        Example:
+        - PV 3.7kW, Load 5.8kW (house 0.7kW + car 5.1kW)
+        - Available = 3.7 - (5.8 - 5.1) = 3.0kW
+        - Car should reduce from 5.1kW to ≤3.0kW
         
         Args:
-            voltage: Line voltage for EV load prediction (unused now)
-            current_ev_load: Current EV power draw in watts
+            voltage: Unused
+            current_ev_load: Current EV power (watts)
+            for_display: Unused (same calculation)
             
         Returns:
-            Total available power budget for EV charging
+            Available power budget for EV (watts)
         """
         # Get power from calculator
         raw_power = self.calculator.update(current_ev_watts=current_ev_load, for_display=for_display)
@@ -366,21 +367,12 @@ class PowerManager:
             
             self.last_available_power = raw_power
             
-            # For display: return raw (already excludes EV from load)
-            if for_display:
-                return raw_power
-            
-            # For control: add current EV load to margin to get total budget
-            total_budget = raw_power + current_ev_load
-            
-            if current_ev_load > 100:
-                self.logger.debug(
-                    f"Budget: {raw_power:.0f}W margin + {current_ev_load:.0f}W current = {total_budget:.0f}W total"
-                )
-            
-            return total_budget
+            # Both display and control use the same value:
+            # PV - (Load - Car) = excess available for car
+            # This is the total power budget the car can use
+            return raw_power
         else:
-            return 0.0 if for_display else (current_ev_load if current_ev_load > 0 else 0.0)
+            return 0.0
     
     def get_target_current(self, charger_controller, current_amps: float) -> Optional[float]:
         """
