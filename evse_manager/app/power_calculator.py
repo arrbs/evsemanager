@@ -474,21 +474,10 @@ class PowerManager:
                     return None
                 
                 else:
-                    # In sweet spot - but check if there's a large external load increase
-                    # Calculate what normal mode would suggest
-                    current_watts = charger_controller.amps_to_watts(current_amps)
-                    available_power = self.get_available_power(current_ev_load=current_watts)
-                    
-                    if available_power is not None:
-                        power_diff = available_power - current_watts
-                        # Large negative diff = external load increased significantly
-                        if power_diff < -2000:  # More than 2kW deficit
-                            if current_idx > 0:
-                                prev_amps = allowed[current_idx - 1]
-                                self.logger.info(f"⚡ Aggressive: large power deficit {power_diff:.0f}W (external load increase), stepping down {current_amps}A → {prev_amps}A")
-                                return prev_amps
-                    
-                    # Otherwise maintain in sweet spot
+                    # In sweet spot - maintain
+                    # Note: We already handle excessive discharge (>1500W) above,
+                    # so no need to check for external load increases here.
+                    # The battery discharge rate itself is the indicator.
                     self.logger.debug(f"⚡ Aggressive: discharge {normalized:.0f}W in target range, maintaining {current_amps}A")
                     return None
             
