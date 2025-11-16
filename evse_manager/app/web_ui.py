@@ -885,9 +885,9 @@ HTML_TEMPLATE = """
                         {
                             label: 'Total PV',
                             data: [],
-                            borderColor: '#fbbf24',
-                            borderWidth: 1.5,
-                            borderDash: [6, 4],
+                            borderColor: '#f59e0b',
+                            borderWidth: 2.5,
+                            borderDash: [8, 4],
                             tension: 0.35,
                             pointRadius: 0,
                             fill: false
@@ -895,9 +895,9 @@ HTML_TEMPLATE = """
                         {
                             label: 'Load',
                             data: [],
-                            borderColor: '#a78bfa',
-                            borderWidth: 1.5,
-                            borderDash: [2, 4],
+                            borderColor: '#8b5cf6',
+                            borderWidth: 2.5,
+                            borderDash: [4, 4],
                             tension: 0.35,
                             pointRadius: 0,
                             fill: false
@@ -905,26 +905,26 @@ HTML_TEMPLATE = """
                         {
                             label: 'Target',
                             data: [],
-                            borderColor: '#60a5fa',
-                            borderWidth: 2,
-                            borderDash: [4, 4],
+                            borderColor: '#3b82f6',
+                            borderWidth: 2.5,
+                            borderDash: [6, 3],
                             pointRadius: 0,
                             fill: false
                         },
                         {
                             label: 'Current',
                             data: [],
-                            borderColor: '#fb923c',
-                            borderWidth: 1.8,
+                            borderColor: '#f97316',
+                            borderWidth: 2.5,
                             pointRadius: 0,
                             fill: false
                         },
                         {
                             label: 'Inverter limit',
                             data: [],
-                            borderColor: '#ef4444',
-                            borderWidth: 1.5,
-                            borderDash: [2, 6],
+                            borderColor: '#dc2626',
+                            borderWidth: 2,
+                            borderDash: [3, 6],
                             pointRadius: 0,
                             fill: false
                         }
@@ -955,16 +955,32 @@ HTML_TEMPLATE = """
                     scales: {
                         y: {
                             beginAtZero: true,
+                            display: true,
                             ticks: {
-                                color: 'rgba(15,23,42,0.75)',
+                                display: true,
+                                color: 'rgba(15,23,42,0.9)',
+                                font: { size: 11, weight: '500' },
                                 callback(value) {
-                                    return `${wattFormatter.format(value)} W`;
+                                    if (value >= 1000) {
+                                        return `${(value/1000).toFixed(1)} kW`;
+                                    }
+                                    return `${Math.round(value)} W`;
                                 }
                             },
-                            grid: { color: 'rgba(148, 163, 184, 0.25)' }
+                            grid: { 
+                                color: 'rgba(148, 163, 184, 0.25)',
+                                display: true
+                            }
                         },
                         x: {
-                            ticks: { color: 'rgba(107,114,128,0.9)' },
+                            display: true,
+                            ticks: { 
+                                display: true,
+                                color: 'rgba(107,114,128,0.9)',
+                                maxRotation: 0,
+                                autoSkip: true,
+                                maxTicksLimit: 8
+                            },
                             grid: { display: false }
                         }
                     }
@@ -1026,14 +1042,18 @@ HTML_TEMPLATE = """
             const labels = normalized.map((_, idx) => {
                 const ts = timestamps[idx];
                 if (ts === null) {
-                    const fallback = idx - normalized.length + 1;
-                    return `${fallback}s`;
+                    const fallback = normalized.length - idx;
+                    return `${fallback}s ago`;
                 }
-                const delta = Math.round((ts - latestTs) / 1000);
+                const delta = Math.round((latestTs - ts) / 1000);
                 if (delta === 0) {
-                    return '0s';
+                    return 'now';
                 }
-                return `${delta}s`;
+                if (delta < 60) {
+                    return `${delta}s ago`;
+                }
+                const mins = Math.floor(delta / 60);
+                return `${mins}m ago`;
             });
             const availableSeries = normalized.map(sample => safeNumber(sample.available));
             const pvSeries = normalized.map(sample => safeNumber(sample.pv));
