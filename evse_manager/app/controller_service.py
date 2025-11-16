@@ -106,6 +106,11 @@ class ControlService:
         current_watts = current_amps * voltage
         target_watts = target_amps * voltage if target_amps else 0.0
         available_power = self._available_power(inputs, derived)
+        
+        # UI-specific display values for available power and PV
+        ui_available_for_ev = self._ui_available_for_ev(inputs, current_watts, derived.region)
+        ui_pv_display = inputs.pv_power_w
+        
         timestamp = datetime.now(timezone.utc).isoformat()
         self._append_history(
             timestamp,
@@ -124,6 +129,8 @@ class ControlService:
             "current_amps": current_amps,
             "target_current": target_amps,
             "available_power": available_power,
+            "ui_available_for_ev": ui_available_for_ev,
+            "ui_pv_display": ui_pv_display,
             "charging_power": current_watts,
             "inverter_power": inputs.inverter_power_w,
             "pv_power_w": inputs.pv_power_w,
@@ -167,6 +174,20 @@ class ControlService:
         if inputs.batt_power_w <= self.runtime_config.controller.probe_max_discharge_w:
             return 0.0
         return None
+
+    def _ui_available_for_ev(self, inputs: Inputs, current_evse_watts: float, region: str) -> Optional[float]:
+        """Calculate UI display value for 'Available for EV'."""
+        # When SOC >= 95% (PROBE region), return None to display "Probing" or "Unknown"
+        if region == "PROBE":
+            return None
+        
+        # When SOC < 95% (MAIN region): Total PV - (Inverter - Current EVSE)
+        if inputs.pv_power_w is None or inputs.inverter_power_w is None:
+            return None
+        
+        # Available = PV - (Inverter - EVSE) = PV - Inverter + EVSE
+        available = inputs.pv_power_w - (inputs.inverter_power_w - current_evse_watts)
+        return available
 
     def _append_history(
         self,

@@ -97,7 +97,9 @@ def load_runtime_config(path: Path = Path("/data/options.json")) -> RuntimeConfi
     controller_cfg = ControllerConfig(
         line_voltage_v=float(_extract("line_voltage_v", 230)),
         soc_main_max=float(_extract("soc_main_max", 95.0)),
+        soc_conservative_below=float(_extract("soc_conservative_below", 94.0)),
         small_discharge_margin_w=float(_extract("small_discharge_margin_w", 200)),
+        conservative_charge_target_w=float(_extract("conservative_charge_target_w", 100)),
         probe_max_discharge_w=float(_extract("probe_max_discharge_w", 1000)),
         inverter_limit_w=float(
             _extract(

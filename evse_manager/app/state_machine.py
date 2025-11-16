@@ -25,7 +25,9 @@ class ControllerConfig:
 
     line_voltage_v: float = 230.0
     soc_main_max: float = 95.0
+    soc_conservative_below: float = 94.0
     small_discharge_margin_w: float = 200.0
+    conservative_charge_target_w: float = 100.0
     probe_max_discharge_w: float = 1000.0
     inverter_limit_w: float = 8000.0
     inverter_margin_w: float = 500.0
@@ -300,6 +302,9 @@ class DeterministicStateMachine:
         return self._set_step(inputs, self.state.evse_step_index - 1, "inverter_step_down")
 
     def _main_ready_logic(self, inputs: Inputs, derived: DerivedValues) -> Optional[Decision]:
+        # Determine if we're in conservative mode (SOC below guard threshold)
+        conservative_mode = self._is_conservative_mode(inputs.batt_soc_percent)
+        
         # Step-up path
         if self.state.evse_step_index > 0 and derived.excess_w is not None:
             if self.state.evse_step_index < len(EVSE_STEPS_AMPS) - 1:
@@ -310,15 +315,33 @@ class DeterministicStateMachine:
                     and self._inverter_safe(inputs, self.state.evse_step_index)
                 ):
                     return self._set_step(inputs, self.state.evse_step_index + 1, "main_step_up")
-            # Hold region
-            if derived.excess_w >= -self.config.small_discharge_margin_w:
-                return None
-            # Step-down
-            if derived.excess_w < -self.config.small_discharge_margin_w:
-                next_index = max(0, self.state.evse_step_index - 1)
-                label = "main_step_down"
-                return self._set_step(inputs, next_index, label)
+            
+            # Hold region - use different thresholds based on conservative mode
+            if conservative_mode:
+                # When SOC is below conservative threshold, prefer small charging over discharge
+                # Step down if we're discharging (excess is negative)
+                # Hold if we're charging at least the target amount
+                if derived.excess_w >= self.config.conservative_charge_target_w:
+                    return None
+                # Step down if not meeting the conservative charge target
+                if derived.excess_w < self.config.conservative_charge_target_w:
+                    next_index = max(0, self.state.evse_step_index - 1)
+                    return self._set_step(inputs, next_index, "main_conservative_step_down")
+            else:
+                # Normal mode: allow small discharge margin
+                if derived.excess_w >= -self.config.small_discharge_margin_w:
+                    return None
+                # Step-down when exceeding discharge margin
+                if derived.excess_w < -self.config.small_discharge_margin_w:
+                    next_index = max(0, self.state.evse_step_index - 1)
+                    return self._set_step(inputs, next_index, "main_step_down")
         return None
+
+    def _is_conservative_mode(self, batt_soc: Optional[float]) -> bool:
+        """Check if SOC is below the conservative threshold."""
+        if batt_soc is None:
+            return False
+        return batt_soc < self.config.soc_conservative_below
 
     def _probe_ready_logic(self, inputs: Inputs, derived: DerivedValues) -> Optional[Decision]:
         batt_power = inputs.batt_power_w

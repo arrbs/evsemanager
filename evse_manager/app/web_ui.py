@@ -637,9 +637,20 @@ HTML_TEMPLATE = """
         }
 
         function updateEnergyChips(data) {
-            document.getElementById('available-chip').textContent = fmt(data.available_power, ' W');
-            const pv = data.pv_power_w ?? data.total_pv_power;
-            document.getElementById('pv-chip').textContent = fmt(pv, ' W');
+            // Display "Available for EV" - show "Probing" when in PROBE region (SOC >= 95%)
+            const availableChip = document.getElementById('available-chip');
+            if (data.ui_available_for_ev === null || data.ui_available_for_ev === undefined) {
+                const region = (data.region || '').toUpperCase();
+                availableChip.textContent = region === 'PROBE' ? 'Probing' : 'Unknown';
+            } else {
+                availableChip.textContent = fmt(data.ui_available_for_ev, ' W');
+            }
+            
+            // Display PV Array (Total PV Power)
+            const pvChip = document.getElementById('pv-chip');
+            const pv = data.ui_pv_display ?? data.pv_power_w ?? data.total_pv_power;
+            pvChip.textContent = fmt(pv, ' W');
+            
             document.getElementById('load-chip').textContent = fmt(data.inverter_power, ' W');
             document.getElementById('ev-draw-chip').textContent = fmt(data.charging_power, ' W');
         }
