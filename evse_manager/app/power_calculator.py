@@ -18,8 +18,24 @@ class PowerCalculator:
         control_config = config.get('control', {})
 
         # Smoothing (support time or sample-based windows)
-        self.smoothing_window_samples = max(1, control_config.get('power_smoothing_window', 60))
-        self.smoothing_window_seconds = control_config.get('power_smoothing_window_seconds')
+        update_interval = max(1, control_config.get('update_interval', 5))
+        configured_seconds = control_config.get('power_smoothing_window_seconds')
+        configured_samples = control_config.get('power_smoothing_window')
+
+        if configured_seconds is not None:
+            self.smoothing_window_seconds = max(5, configured_seconds)
+        elif configured_samples is not None:
+            self.smoothing_window_seconds = max(5, configured_samples * update_interval)
+        else:
+            # Default to ~30 seconds of history for responsive behavior
+            self.smoothing_window_seconds = 30
+
+        # Keep sample fallback for environments that prefer sample counts
+        if configured_samples is not None:
+            self.smoothing_window_samples = max(1, configured_samples)
+        else:
+            derived_samples = max(1, int(round(self.smoothing_window_seconds / update_interval)))
+            self.smoothing_window_samples = derived_samples
         self.power_history = deque()
         self.last_update = None
 

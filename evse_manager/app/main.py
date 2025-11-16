@@ -144,7 +144,7 @@ class EVSEManager:
                     'grace_period': config.get('grace_period', 600),
                     'min_session_duration': 600,
                     'power_smoothing_window': config.get('power_smoothing_window', 60),
-                    'power_smoothing_window_seconds': config.get('power_smoothing_window_seconds', 120),
+                    'power_smoothing_window_seconds': config.get('power_smoothing_window_seconds', 30),
                     'hysteresis_watts': config.get('hysteresis_watts', 500),
                     'start_retry_attempts': config.get('start_retry_attempts', 2),
                     'start_retry_delay': config.get('start_retry_delay', 3),

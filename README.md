@@ -173,6 +173,7 @@ control:
   grace_period: 600
   min_session_duration: 600
   power_smoothing_window: 60
+  power_smoothing_window_seconds: 30
   hysteresis_watts: 500
 
 log_level: "info"
