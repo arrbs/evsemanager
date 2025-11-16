@@ -131,10 +131,13 @@ class EVSEManager:
                 'sensors': {
                     'battery_soc_entity': config.get('battery_soc'),
                     'battery_power_entity': config.get('battery_power'),
+                    'battery_power_charging_positive': config.get('battery_power_charging_positive', False),
                     'battery_high_soc': 95,
                     'battery_priority_soc': config.get('battery_priority_soc', 80),
                     'battery_target_discharge_min': 0,
                     'battery_target_discharge_max': 1500,
+                    'total_pv_entity': config.get('total_pv_power'),
+                    'total_load_entity': config.get('total_load_power'),
                     'inverter_power_entity': config.get('inverter_power'),
                     'inverter_max_power': 8000
                 },

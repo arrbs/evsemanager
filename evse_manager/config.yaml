@@ -1,5 +1,5 @@
 name: EVSE Manager
-version: "0.1.36"
+version: "0.1.37"
 slug: evse_manager
 description: Intelligent EVSE power management with solar optimization
 url: "https://github.com/arrbs/evsemanager"
@@ -35,6 +35,10 @@ options:
   # Set to true if your inverter reports positive watts while charging the battery
   battery_power_charging_positive: false
   
+  # Power flow sensors (required for accurate solar calculation)
+  total_pv_power: "sensor.total_pv_power"
+  total_load_power: "sensor.total_load_power"
+  
   # Optional sensors
   voltage_sensor: "sensor.ss_inverter_voltage"
   inverter_power: "sensor.ss_inverter_power"
@@ -63,6 +67,8 @@ schema:
   battery_soc: str
   battery_power: str
   battery_power_charging_positive: bool?
+  total_pv_power: str
+  total_load_power: str
   voltage_sensor: str?
   inverter_power: str?
   battery_priority_soc: int(0,100)
