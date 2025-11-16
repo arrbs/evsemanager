@@ -1,5 +1,5 @@
 name: EVSE Manager
-version: "1.1.1"
+version: "1.2.0"
 slug: evse_manager
 description: Deterministic EVSE control loop with neon web dashboard
 url: "https://github.com/arrbs/evsemanager"
@@ -44,6 +44,8 @@ options:
   cooldown_s: 5
   waiting_timeout_s: 60
   sensor_latency_s: 25
+  switch_jiggle_attempts: 2
+  switch_jiggle_delay_s: 1.2
 
   # Web UI
   ui_access_logs: false
@@ -71,6 +73,8 @@ schema:
   cooldown_s: float(1,15)?
   waiting_timeout_s: float(10,600)?
   sensor_latency_s: float(5,120)?
+  switch_jiggle_attempts: int(1,5)?
+  switch_jiggle_delay_s: float(0.2,5)?
   ui_access_logs: bool?
 
   log_level: list(debug|info|warning|error)?

@@ -153,6 +153,15 @@ control:
   min_session_duration: 600     # Minimum session time (seconds)
   power_smoothing_window: 60    # Smoothing window for power readings (seconds)
   hysteresis_watts: 500         # Minimum power change to trigger adjustment
+
+switch_jiggle_attempts: 2       # How many ON pulses to send before giving up
+switch_jiggle_delay_s: 1.2      # Delay between ON pulses (seconds)
+
+```
+
+If your EVSE contactor behaves like a "jiggle switch" (turning itself off after the
+first ON pulse) set `switch_jiggle_attempts` and `switch_jiggle_delay_s`. The HA
+adapter owns this retry logic so the state machine stays deterministic.
 ```
 
 ### Complete Example Configuration

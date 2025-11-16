@@ -36,252 +36,309 @@ HTML_TEMPLATE = """
 <head>
     <meta charset=\"UTF-8\">
     <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
-    <title>EVSE Neural Grid</title>
+    <title>EVSE LCARS Console</title>
     <link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">
     <link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>
-    <link href=\"https://fonts.googleapis.com/css2?family=Orbitron:wght@400;600;700&family=Space+Grotesk:wght@400;500;600&display=swap\" rel=\"stylesheet\">
+    <link href=\"https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;600&family=Space+Grotesk:wght@400;500&display=swap\" rel=\"stylesheet\">
     <script src=\"https://cdn.jsdelivr.net/npm/chart.js@4.4.6/dist/chart.umd.min.js\"></script>
     <style>
         :root {
-            --accent: #66fcf1;
-            --accent-2: #ff00b8;
-            --panel: rgba(8, 10, 32, 0.85);
-            --stroke: rgba(102, 252, 241, 0.25);
-            --text: #e6f7ff;
-            --muted: #7f9fa8;
+            --lcars-bg: #050408;
+            --lcars-panel: #0f0c1a;
+            --lcars-dark: #120d1f;
+            --lcars-amber: #f7a21c;
+            --lcars-pink: #f04c7c;
+            --lcars-cyan: #5de0ec;
+            --lcars-violet: #b48bff;
+            --lcars-muted: #8f8ba5;
+            --lcars-text: #f4f2ff;
         }
         * { box-sizing: border-box; }
         body {
             margin: 0;
             min-height: 100vh;
-            font-family: 'Space Grotesk', 'Segoe UI', system-ui, sans-serif;
-            background: radial-gradient(circle at 18% 18%, rgba(102,252,241,0.12), transparent 45%),
-                        radial-gradient(circle at 82% 12%, rgba(255,0,184,0.18), transparent 50%),
-                        #020210;
-            color: var(--text);
+            font-family: 'Rajdhani', 'Space Grotesk', 'Segoe UI', sans-serif;
+            background: radial-gradient(circle at 20% 20%, rgba(244,162,28,0.12), transparent 55%),
+                        radial-gradient(circle at 70% 0%, rgba(93,224,236,0.18), transparent 50%),
+                        var(--lcars-bg);
+            color: var(--lcars-text);
         }
         body::before {
             content: '';
             position: fixed;
             inset: 0;
-            background-image: linear-gradient(rgba(102,252,241,0.08) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(102,252,241,0.06) 1px, transparent 1px);
-            background-size: 80px 80px;
+            background-image: linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
+                              linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
+            background-size: 120px 120px;
             pointer-events: none;
-            opacity: 0.4;
         }
         main {
-            position: relative;
-            z-index: 1;
-            padding: 40px clamp(16px, 5vw, 72px) 80px;
+            padding: clamp(16px, 4vw, 48px);
         }
-        header {
+        .lcars-header {
             display: flex;
-            flex-wrap: wrap;
-            align-items: center;
             justify-content: space-between;
-            gap: 16px;
-            margin-bottom: 32px;
-        }
-        .logo {
-            font-family: 'Orbitron', sans-serif;
-            letter-spacing: 0.28em;
-            font-size: clamp(26px, 4vw, 46px);
-            display: flex;
             align-items: center;
+            margin-bottom: 28px;
             gap: 12px;
         }
-        .logo::before {
-            content: '';
-            width: 14px;
-            height: 14px;
-            border-radius: 50%;
-            background: var(--accent);
-            box-shadow: 0 0 16px var(--accent);
+        .lcars-title {
+            font-size: clamp(28px, 5vw, 54px);
+            letter-spacing: 0.32em;
+            color: var(--lcars-amber);
         }
-        .status-chip {
-            padding: 10px 18px;
+        .lcars-header::after {
+            content: '';
+            flex: 1;
+            height: 6px;
+            background: linear-gradient(90deg, var(--lcars-amber), var(--lcars-pink));
             border-radius: 999px;
-            border: 1px solid var(--stroke);
-            background: rgba(4, 10, 30, 0.8);
-            letter-spacing: 0.18em;
+            margin-left: 18px;
+        }
+        .status-badge {
+            padding: 12px 20px;
+            border-radius: 999px;
+            background: var(--lcars-panel);
+            border: 2px solid var(--lcars-pink);
+            letter-spacing: 0.3em;
             font-size: 12px;
         }
-        .grid {
+        .lcars-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
+            grid-template-columns: minmax(240px, 280px) minmax(320px, 1fr) minmax(260px, 320px);
+            gap: 20px;
         }
-        .card {
-            background: var(--panel);
-            border: 1px solid var(--stroke);
+        .lcars-stack, .lcars-bridge, .lcars-side {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+        }
+        .stack-segment {
+            background: var(--lcars-panel);
+            padding: 18px;
+            border-radius: 32px 12px 12px 32px;
+            border-left: 12px solid var(--lcars-amber);
+            border-right: 2px solid rgba(255,255,255,0.08);
+            min-height: 80px;
+        }
+        .segment-title {
+            font-size: 11px;
+            letter-spacing: 0.4em;
+            text-transform: uppercase;
+            color: var(--lcars-muted);
+        }
+        .segment-value {
+            font-size: 28px;
+            letter-spacing: 0.2em;
+            margin-top: 6px;
+        }
+        .segment-subtext {
+            font-size: 13px;
+            color: var(--lcars-muted);
+        }
+        .lcars-rail {
+            display: flex;
+            gap: 8px;
+            flex-wrap: nowrap;
+            overflow-x: auto;
+            padding: 6px;
+            background: var(--lcars-dark);
+            border-radius: 32px;
+            border: 1px solid rgba(255,255,255,0.05);
+        }
+        .rail-step {
+            flex: 1;
+            min-width: 80px;
+            padding: 10px 12px;
             border-radius: 18px;
-            padding: 24px;
-            box-shadow: 0 0 32px rgba(0,0,0,0.45);
+            text-align: center;
+            background: rgba(255,255,255,0.04);
+            border: 1px solid transparent;
+            transition: transform 0.2s ease;
+        }
+        .rail-step.active {
+            background: var(--lcars-amber);
+            color: #130a05;
+            border-color: rgba(0,0,0,0.2);
+        }
+        .rail-step.target {
+            border-color: var(--lcars-pink);
+        }
+        .rail-step small {
+            display: block;
+            letter-spacing: 0.2em;
+            font-size: 11px;
+            color: rgba(255,255,255,0.6);
+        }
+        .panel {
+            background: var(--lcars-panel);
+            border-radius: 28px;
+            padding: 20px;
+            border: 1px solid rgba(255,255,255,0.08);
             position: relative;
             overflow: hidden;
         }
-        .card::after {
+        .panel::after {
             content: '';
             position: absolute;
-            inset: 1px;
-            border-radius: 16px;
+            inset: 6px;
+            border-radius: 20px;
             border: 1px solid rgba(255,255,255,0.05);
             pointer-events: none;
         }
-        h2 {
-            margin: 0 0 16px;
-            font-family: 'Orbitron', sans-serif;
-            letter-spacing: 0.14em;
+        .panel-title {
+            font-size: 12px;
+            letter-spacing: 0.5em;
             text-transform: uppercase;
-            color: var(--muted);
+            margin-bottom: 12px;
+            color: var(--lcars-muted);
         }
-        .core-stats {
+        .metric-board {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
             gap: 12px;
         }
-        .metric-label { font-size: 11px; color: var(--muted); }
-        .metric-value {
-            font-size: 26px;
-            font-family: 'Orbitron', sans-serif;
-            margin-top: 4px;
-            letter-spacing: 0.1em;
+        .metric {
+            background: rgba(255,255,255,0.02);
+            border-radius: 16px;
+            padding: 12px 14px;
+            border: 1px solid rgba(255,255,255,0.04);
         }
-        .bar-track {
-            margin-top: 10px;
-            height: 12px;
-            border-radius: 999px;
-            background: rgba(255,255,255,0.08);
-            overflow: hidden;
+        .metric span:first-child {
+            font-size: 11px;
+            letter-spacing: 0.3em;
+            color: var(--lcars-muted);
         }
-        .bar-fill {
-            height: 100%;
-            border-radius: inherit;
-            background: linear-gradient(90deg, var(--accent), var(--accent-2));
-            width: 0%;
-            transition: width 0.4s ease;
+        .metric strong {
+            display: block;
+            font-size: 24px;
+            margin-top: 6px;
+            letter-spacing: 0.15em;
         }
-        .timeline {
+        .auto-help {
+            margin-top: 12px;
+            font-size: 13px;
+            color: var(--lcars-muted);
+            line-height: 1.4;
+        }
+        .timeline-list {
             list-style: none;
-            padding: 0;
             margin: 0;
+            padding: 0;
+            max-height: 220px;
+            overflow-y: auto;
             display: flex;
             flex-direction: column;
-            gap: 12px;
-            max-height: 240px;
-            overflow-y: auto;
+            gap: 10px;
         }
-        .timeline li {
-            padding: 10px 14px;
-            border-radius: 12px;
-            border: 1px solid rgba(255,255,255,0.05);
-            background: rgba(255,255,255,0.02);
+        .timeline-list li {
             display: flex;
             justify-content: space-between;
             gap: 12px;
+            background: rgba(0,0,0,0.18);
+            border-radius: 14px;
+            padding: 10px 12px;
             font-size: 13px;
         }
-        .chip-row { display: flex; flex-wrap: wrap; gap: 10px; }
-        .chip {
-            padding: 6px 12px;
-            border-radius: 999px;
-            border: 1px solid rgba(255,255,255,0.1);
-            letter-spacing: 0.16em;
-            font-size: 10px;
+        .constraint-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .constraint {
+            padding: 10px 14px;
+            border-radius: 20px;
+            border: 1px solid rgba(255,255,255,0.07);
+            background: rgba(255,255,255,0.03);
+            letter-spacing: 0.2em;
+            font-size: 11px;
             text-transform: uppercase;
         }
-        .chip.alert { border-color: #ff4d82; color: #ffb3cd; }
+        .constraint.alert {
+            border-color: var(--lcars-pink);
+            color: var(--lcars-pink);
+        }
+        .battery-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 10px;
+        }
         canvas { width: 100% !important; height: 220px !important; }
-        footer {
-            margin-top: 32px;
-            text-align: center;
-            font-size: 12px;
-            letter-spacing: 0.2em;
-            color: rgba(230,247,255,0.6);
+        @media (max-width: 1100px) {
+            .lcars-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
     <main>
-        <header>
-            <div class=\"logo\">EVSE NEURAL GRID</div>
-            <div class=\"status-chip\" id=\"status-chip\">INITIALIZING</div>
-        </header>
-        <section class=\"grid\">
-            <article class=\"card\">
-                <h2>State Core</h2>
-                <div class=\"core-stats\">
-                    <div>
-                        <div class=\"metric-label\">Mode</div>
-                        <div class=\"metric-value\" id=\"mode-value\">AUTO</div>
-                    </div>
-                    <div>
-                        <div class=\"metric-label\">State</div>
-                        <div class=\"metric-value\" id=\"auto-state\">IDLE</div>
-                    </div>
-                    <div>
-                        <div class=\"metric-label\">Status</div>
-                        <div class=\"metric-value\" id=\"charger-status\">UNKNOWN</div>
-                    </div>
-                    <div>
-                        <div class=\"metric-label\">Limiter</div>
-                        <div class=\"metric-value\" id=\"limiter-label\">CLEAR</div>
-                    </div>
+        <div class=\"lcars-header\">
+            <div class=\"lcars-title\">EVSE LCARS</div>
+            <div class=\"status-badge\" id=\"status-chip\">INITIALIZING</div>
+        </div>
+        <div class=\"lcars-grid\">
+            <section class=\"lcars-stack\">
+                <div class=\"stack-segment\">
+                    <div class=\"segment-title\">MODE</div>
+                    <div class=\"segment-value\" id=\"mode-value\">AUTO</div>
+                    <div class=\"segment-subtext\">Deterministic FSM</div>
                 </div>
-                <div style=\"margin-top:20px; display:grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap:14px;\">
-                    <div>
-                        <div class=\"metric-label\">Current</div>
-                        <div class=\"metric-value\" id=\"current-amps\">0 A</div>
-                        <div class=\"bar-track\"><div class=\"bar-fill\" id=\"current-bar\"></div></div>
-                    </div>
-                    <div>
-                        <div class=\"metric-label\">Target</div>
-                        <div class=\"metric-value\" id=\"target-amps\">0 A</div>
-                        <div class=\"bar-track\"><div class=\"bar-fill\" id=\"target-bar\"></div></div>
-                    </div>
+                <div class=\"stack-segment\">
+                    <div class=\"segment-title\">STATE</div>
+                    <div class=\"segment-value\" id=\"auto-state\">IDLE</div>
+                    <div class=\"segment-subtext\" id=\"state-help\">Awaiting telemetry</div>
                 </div>
-            </article>
-            <article class=\"card\">
-                <h2>Energy Streams</h2>
-                <canvas id=\"energy-chart\"></canvas>
-                <div class=\"chip-row\" style=\"margin-top:16px;\">
-                    <span class=\"chip\" id=\"pv-chip\">PV -- W</span>
-                    <span class=\"chip\" id=\"available-chip\">AVAILABLE -- W</span>
-                    <span class=\"chip\" id=\"load-chip\">INVERTER -- W</span>
+                <div class=\"stack-segment\">
+                    <div class=\"segment-title\">CHARGER</div>
+                    <div class=\"segment-value\" id=\"charger-status\">UNKNOWN</div>
+                    <div class=\"segment-subtext\" id=\"limiter-label\">CLEAR</div>
                 </div>
-            </article>
-            <article class=\"card\">
-                <h2>Timeline</h2>
-                <ul class=\"timeline\" id=\"timeline\"></ul>
-            </article>
-            <article class=\"card\">
-                <h2>Battery Stack</h2>
-                <div class=\"core-stats\">
-                    <div>
-                        <div class=\"metric-label\">SOC</div>
-                        <div class=\"metric-value\" id=\"battery-soc\">-- %</div>
-                    </div>
-                    <div>
-                        <div class=\"metric-label\">Power</div>
-                        <div class=\"metric-value\" id=\"battery-power\">-- W</div>
-                    </div>
-                    <div>
-                        <div class=\"metric-label\">Flow</div>
-                        <div class=\"metric-value\" id=\"battery-direction\">--</div>
-                    </div>
-                    <div>
-                        <div class=\"metric-label\">Guard</div>
-                        <div class=\"metric-value\" id=\"battery-guard\">-- %</div>
-                    </div>
+                <div class=\"stack-segment\">
+                    <div class=\"segment-title\">CURRENT / TARGET</div>
+                    <div class=\"segment-value\"><span id=\"current-amps\">0 A</span> · <span id=\"target-amps\">0 A</span></div>
+                    <div class=\"segment-subtext\" id=\"step-indicator\">EVSE STEP 0</div>
                 </div>
-                <div style=\"margin-top:18px;\">
-                    <div class=\"metric-label\">Limiting Factors</div>
-                    <div class=\"chip-row\" id=\"limit-chips\" style=\"margin-top:10px;\"></div>
-                </div>
-            </article>
-        </section>
-        <footer>deterministic solar control • neon rev 1</footer>
+            </section>
+            <section class=\"lcars-bridge\">
+                <div class=\"lcars-rail\" id=\"step-rail\"></div>
+                <article class=\"panel\">
+                    <div class=\"panel-title\">ENERGY SYNTHESIS</div>
+                    <canvas id=\"energy-chart\"></canvas>
+                    <div class=\"metric-board\" style=\"margin-top:14px;\">
+                        <div class=\"metric\"><span>AVAILABLE</span><strong id=\"available-chip\">-- W</strong></div>
+                        <div class=\"metric\"><span>PV ARRAY</span><strong id=\"pv-chip\">-- W</strong></div>
+                        <div class=\"metric\"><span>INVERTER</span><strong id=\"load-chip\">-- W</strong></div>
+                        <div class=\"metric\"><span>CHARGING</span><strong id=\"charging-chip\">-- W</strong></div>
+                    </div>
+                </article>
+                <article class=\"panel\">
+                    <div class=\"panel-title\">TEMPORAL TRACE</div>
+                    <ul class=\"timeline-list\" id=\"timeline\"></ul>
+                </article>
+            </section>
+            <section class=\"lcars-side\">
+                <article class=\"panel\">
+                    <div class=\"panel-title\">AUTO LOGIC</div>
+                    <div class=\"metric-board\">
+                        <div class=\"metric\"><span>STATUS</span><strong id=\"status-indicator\">IDLE</strong></div>
+                        <div class=\"metric\"><span>AVAILABLE</span><strong id=\"auto-state-label\">--</strong></div>
+                    </div>
+                    <p class=\"auto-help\" id=\"auto-help\">State narrative will appear here.</p>
+                </article>
+                <article class=\"panel\">
+                    <div class=\"panel-title\">CONSTRAINT STACK</div>
+                    <div class=\"constraint-list\" id=\"constraint-chips\"></div>
+                </article>
+                <article class=\"panel\">
+                    <div class=\"panel-title\">BATTERY + GUARD</div>
+                    <div class=\"battery-grid\">
+                        <div class=\"metric\"><span>SOC</span><strong id=\"battery-soc\">-- %</strong></div>
+                        <div class=\"metric\"><span>FLOW</span><strong id=\"battery-direction\">--</strong></div>
+                        <div class=\"metric\"><span>POWER</span><strong id=\"battery-power\">-- W</strong></div>
+                        <div class=\"metric\"><span>GUARD</span><strong id=\"battery-guard\">-- %</strong></div>
+                    </div>
+                </article>
+            </section>
+        </div>
     </main>
     <script>
         const FALLBACK = {{ fallback_json | safe }};
@@ -298,17 +355,17 @@ HTML_TEMPLATE = """
                 data: {
                     labels: [],
                     datasets: [
-                        { label: 'Available', data: [], borderColor: '#66fcf1', backgroundColor: 'rgba(102,252,241,0.15)', fill: true, tension: 0.35 },
-                        { label: 'PV', data: [], borderColor: '#ff00b8', borderDash: [6,4], tension: 0.35 },
-                        { label: 'Charging', data: [], borderColor: '#ffd369', tension: 0.35 }
+                        { label: 'Available', data: [], borderColor: '#f7a21c', backgroundColor: 'rgba(247,162,28,0.15)', fill: true, tension: 0.35 },
+                        { label: 'PV', data: [], borderColor: '#5de0ec', borderDash: [8,4], tension: 0.35 },
+                        { label: 'Charging', data: [], borderColor: '#f04c7c', tension: 0.35 }
                     ]
                 },
                 options: {
                     animation: false,
-                    plugins: { legend: { labels: { color: 'rgba(230,247,255,0.8)' } } },
+                    plugins: { legend: { labels: { color: 'rgba(244,242,255,0.8)', font: { family: 'Rajdhani' } } } },
                     scales: {
-                        x: { ticks: { color: 'rgba(230,247,255,0.6)' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                        y: { ticks: { color: 'rgba(230,247,255,0.6)' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+                        x: { ticks: { color: 'rgba(244,242,255,0.6)' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+                        y: { ticks: { color: 'rgba(244,242,255,0.6)' }, grid: { color: 'rgba(255,255,255,0.05)' } }
                     }
                 }
             });
@@ -319,14 +376,31 @@ HTML_TEMPLATE = """
             return `${Math.round(value)}${suffix}`;
         }
 
-        function pct(value) {
-            return Math.min(100, Math.max(0, value));
+        function findStepIndex(steps, amps) {
+            if (!steps?.length || amps == null) return -1;
+            const rounded = Math.round(amps);
+            return steps.findIndex(step => Math.round(step.amps) === rounded);
         }
 
-        function updateBars(currentWatts, targetWatts, steps) {
-            const max = steps?.length ? steps[steps.length - 1].watts : 6000;
-            document.getElementById('current-bar').style.width = `${pct((currentWatts / (max || 1)) * 100)}%`;
-            document.getElementById('target-bar').style.width = `${pct((targetWatts / (max || 1)) * 100)}%`;
+        function renderRail(steps, currentAmps, targetAmps) {
+            const rail = document.getElementById('step-rail');
+            rail.innerHTML = '';
+            if (!steps?.length) {
+                rail.innerHTML = '<div class="rail-step">NO STEPS</div>';
+                return;
+            }
+            const currentIndex = findStepIndex(steps, currentAmps);
+            const targetIndex = findStepIndex(steps, targetAmps);
+            steps.forEach((step, index) => {
+                const div = document.createElement('div');
+                div.className = 'rail-step';
+                if (index === currentIndex) div.classList.add('active');
+                if (index === targetIndex && index !== currentIndex) div.classList.add('target');
+                div.innerHTML = `<small>${index}</small>${step.amps}A`;
+                rail.appendChild(div);
+            });
+            const indicator = document.getElementById('step-indicator');
+            indicator.textContent = currentIndex >= 0 ? `STEP ${currentIndex}` : 'STEP ?';
         }
 
         function updateTimeline(history) {
@@ -339,30 +413,29 @@ HTML_TEMPLATE = """
             history.slice(-8).reverse().forEach(sample => {
                 const ts = sample.ts ? new Date(sample.ts) : null;
                 const label = ts ? ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '--';
-                const payload = `Avail ${fmt(sample.available, 'W')} · Curr ${fmt(sample.current, 'W')} · Target ${fmt(sample.target, 'W')}`;
+                const payload = `Avail ${fmt(sample.available, 'W')} / Curr ${fmt(sample.current, 'W')} / Target ${fmt(sample.target, 'W')}`;
                 const li = document.createElement('li');
                 li.innerHTML = `<span>${label}</span><span>${payload}</span>`;
                 list.appendChild(li);
             });
         }
 
-        function updateChips(limiting, available, pv, inverter) {
-            const chips = document.getElementById('limit-chips');
-            chips.innerHTML = '';
+        function updateConstraints(limiting) {
+            const host = document.getElementById('constraint-chips');
+            host.innerHTML = '';
             if (!limiting?.length) {
-                chips.innerHTML = '<span class=\"chip\">Clear</span>';
-            } else {
-                limiting.forEach(item => {
-                    const span = document.createElement('span');
-                    span.className = 'chip alert';
-                    span.textContent = item.replace(/_/g, ' ');
-                    chips.appendChild(span);
-                });
+                const span = document.createElement('div');
+                span.className = 'constraint';
+                span.textContent = 'CLEAR CHANNEL';
+                host.appendChild(span);
+                return;
             }
-            document.getElementById('pv-chip').textContent = `PV ${fmt(pv, ' W')}`;
-            document.getElementById('available-chip').textContent = `Available ${fmt(available, ' W')}`;
-            document.getElementById('load-chip').textContent = `Inverter ${fmt(inverter, ' W')}`;
-            document.getElementById('limiter-label').textContent = limiting?.[0]?.replace(/_/g, ' ') || 'CLEAR';
+            limiting.forEach(item => {
+                const span = document.createElement('div');
+                span.className = 'constraint alert';
+                span.textContent = item.replace(/_/g, ' ');
+                host.appendChild(span);
+            });
         }
 
         function pumpChart(history, availablePower, pvPower, chargingPower) {
@@ -375,25 +448,46 @@ HTML_TEMPLATE = """
             energyChart.update('none');
         }
 
-        function applyData(data) {
+        function updateMetrics(data) {
             document.getElementById('status-chip').textContent = (data.status || 'idle').toUpperCase();
             document.getElementById('mode-value').textContent = (data.mode || 'auto').toUpperCase();
             document.getElementById('auto-state').textContent = data.auto_state_label || '--';
+            document.getElementById('state-help').textContent = data.auto_state_help || 'Awaiting telemetry';
             document.getElementById('charger-status').textContent = (data.charger_status || '--').toUpperCase();
+            document.getElementById('limiter-label').textContent = (data.limiting_factors?.[0] || 'Clear channel').replace(/_/g, ' ');
             document.getElementById('current-amps').textContent = `${data.current_amps ?? 0} A`;
             document.getElementById('target-amps').textContent = `${data.target_current ?? 0} A`;
+            document.getElementById('status-indicator').textContent = (data.status || 'idle').toUpperCase();
+            document.getElementById('auto-state-label').textContent = data.auto_state_label || '--';
+            document.getElementById('auto-help').textContent = data.auto_state_help || 'No guidance available.';
+        }
 
-            const map = data.energy_map || {};
-            updateBars(map.current_watts || 0, map.target_watts || 0, map.evse_steps || []);
-            updateTimeline(map.history || []);
-            updateChips(data.limiting_factors || [], data.available_power, data.pv_power_w || data.total_pv_power, data.inverter_power);
-            pumpChart(map.history || [], data.available_power, data.pv_power_w || data.total_pv_power, data.charging_power);
+        function updateEnergyChips(data) {
+            document.getElementById('available-chip').textContent = fmt(data.available_power, ' W');
+            const pv = data.pv_power_w ?? data.total_pv_power;
+            document.getElementById('pv-chip').textContent = fmt(pv, ' W');
+            document.getElementById('load-chip').textContent = fmt(data.inverter_power, ' W');
+            document.getElementById('charging-chip').textContent = fmt(data.charging_power, ' W');
+        }
 
+        function updateBattery(data) {
             const battery = data.battery || {};
             document.getElementById('battery-soc').textContent = battery.soc != null ? `${battery.soc.toFixed(1)} %` : '-- %';
             document.getElementById('battery-power').textContent = battery.power != null ? `${Math.round(battery.power)} W` : '-- W';
             document.getElementById('battery-direction').textContent = (battery.direction || '--').toUpperCase();
             document.getElementById('battery-guard').textContent = `${data.battery_priority_soc ?? '--'} %`;
+        }
+
+        function applyData(data) {
+            updateMetrics(data);
+            updateConstraints(data.limiting_factors || []);
+            updateBattery(data);
+            updateEnergyChips(data);
+
+            const map = data.energy_map || {};
+            renderRail(map.evse_steps || [], data.current_amps, data.target_current);
+            updateTimeline(map.history || []);
+            pumpChart(map.history || [], data.available_power, data.pv_power_w || data.total_pv_power, data.charging_power);
         }
 
         async function fetchStatus() {

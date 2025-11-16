@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 from controller_config import EntityConfig
 from state_machine import Decision, Inputs
@@ -26,10 +27,19 @@ class SensorSnapshot:
 class HomeAssistantAdapter:
     """Thin layer that isolates HA REST calls from the FSM."""
 
-    def __init__(self, api, entity_config: EntityConfig, logger: Optional[logging.Logger] = None):
+    def __init__(
+        self,
+        api,
+        entity_config: EntityConfig,
+        logger: Optional[logging.Logger] = None,
+        sleep_fn: Callable[[float], None] = time.sleep,
+    ):
         self.api = api
         self.entities = entity_config
         self.logger = logger or logging.getLogger(__name__)
+        self._sleep = sleep_fn
+        self._jiggle_attempts = max(1, entity_config.switch_jiggle_attempts)
+        self._jiggle_delay_s = max(0.0, entity_config.switch_jiggle_delay_s)
 
     def read_inputs(self, now_s: float) -> Inputs:
         snapshot = self._poll_entities()
@@ -68,16 +78,39 @@ class HomeAssistantAdapter:
     def apply_decision(self, decision: Decision) -> None:
         """Apply switch/current commands to Home Assistant."""
         if decision.switch_command is not None:
-            desired = decision.switch_command
-            entity_id = self.entities.charger_switch
-            service = "turn_on" if desired else "turn_off"
-            self.logger.info("%s -> %s (%s)", entity_id, service, decision.reason)
-            self.api.call_service("switch", service, entity_id=entity_id)
+            self._apply_switch(decision.switch_command, decision.reason)
         if decision.current_command_amps is not None:
             entity_id = self.entities.charger_current
             value = decision.current_command_amps
             self.logger.info("%s -> %s A (%s)", entity_id, value, decision.reason)
             self.api.call_service("number", "set_value", entity_id=entity_id, value=value)
+
+    def _apply_switch(self, desired_on: bool, reason: str) -> None:
+        entity_id = self.entities.charger_switch
+        if not desired_on or self._jiggle_attempts <= 1:
+            service = "turn_on" if desired_on else "turn_off"
+            self.logger.info("%s -> %s (%s)", entity_id, service, reason)
+            self.api.call_service("switch", service, entity_id=entity_id)
+            return
+        self.logger.info(
+            "%s -> turn_on (jiggle x%s, %ss delay, %s)",
+            entity_id,
+            self._jiggle_attempts,
+            self._jiggle_delay_s,
+            reason,
+        )
+        self._jiggle_switch_on(entity_id)
+
+    def _jiggle_switch_on(self, entity_id: str) -> None:
+        for attempt in range(1, self._jiggle_attempts + 1):
+            self.api.call_service("switch", "turn_on", entity_id=entity_id)
+            if self._jiggle_delay_s:
+                self._sleep(self._jiggle_delay_s)
+            state = self.api.get_state(entity_id)
+            if isinstance(state, str) and state.strip().lower() == "on":
+                self.logger.info("%s latched ON after %s attempts", entity_id, attempt)
+                return
+        self.logger.warning("%s failed to latch ON after %s attempts", entity_id, self._jiggle_attempts)
 
     # ---------------------------------------------------------------------
     # Helpers

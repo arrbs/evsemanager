@@ -20,6 +20,8 @@ class EntityConfig:
     pv_power: Optional[str]
     auto_enabled: Optional[str]
     auto_enabled_default: bool
+    switch_jiggle_attempts: int
+    switch_jiggle_delay_s: float
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,9 @@ def load_runtime_config(path: Path = Path("/data/options.json")) -> RuntimeConfi
     )
     tick_seconds = max(1.0, min(2.0, tick_seconds))
 
+    switch_jiggle_attempts = int(_extract("switch_jiggle_attempts", 2))
+    switch_jiggle_delay_s = float(_extract("switch_jiggle_delay_s", 1.0))
+
     entities_cfg = EntityConfig(
         charger_switch=charger_switch,
         charger_current=charger_current,
@@ -124,6 +129,8 @@ def load_runtime_config(path: Path = Path("/data/options.json")) -> RuntimeConfi
         pv_power=pv_power,
         auto_enabled=auto_enabled_entity,
         auto_enabled_default=auto_enabled_default,
+        switch_jiggle_attempts=max(1, switch_jiggle_attempts),
+        switch_jiggle_delay_s=max(0.0, switch_jiggle_delay_s),
     )
 
     log_level = str(_extract("log_level", "INFO")).upper()
