@@ -231,19 +231,28 @@ class BatteryCalculator(PowerCalculator):
                 else:
                     # CONTROL DECISION LOGIC
                     if soc >= 95:
-                        # High SOC: allow using battery charge/discharge for EV
+                        # High SOC: aggressive mode to discharge battery back to 95%
                         margin = pv_power - load_power
-                        if normalized_power > 0 and normalized_power <= self.target_discharge_max:
-                            # Battery discharging at acceptable rate - add as available
+                        if normalized_power < 0:
+                            # Battery STILL CHARGING despite SOC≥95% = lots of excess solar
+                            # Report MUCH higher available to probe upward and discharge battery
+                            # The system has excess = margin + what's going to battery + likely more
+                            excess_to_battery = abs(normalized_power)
+                            # Assume we can pull at least 2-3x what's currently going to battery
+                            probing_bonus = excess_to_battery * 3
+                            available = margin + excess_to_battery + probing_bonus
+                            self.logger.info(
+                                f"Control (SOC≥95%, battery charging): AGGRESSIVE mode - "
+                                f"margin {margin:.0f}W + battery {excess_to_battery:.0f}W + probe {probing_bonus:.0f}W = {available:.0f}W available"
+                            )
+                        elif normalized_power > 0 and normalized_power <= self.target_discharge_max:
+                            # Battery discharging at acceptable rate - maintain or increase
                             available = margin + normalized_power
-                            self.logger.debug(f"Control (SOC≥95%): margin {margin:.0f}W + discharge {normalized_power:.0f}W = {available:.0f}W")
-                        elif normalized_power < 0:
-                            # Battery charging - that power could go to EV instead
-                            available = margin + abs(normalized_power)
-                            self.logger.debug(f"Control (SOC≥95%): margin {margin:.0f}W + charging {abs(normalized_power):.0f}W = {available:.0f}W")
+                            self.logger.debug(f"Control (SOC≥95%, discharging): margin {margin:.0f}W + discharge {normalized_power:.0f}W = {available:.0f}W")
                         else:
+                            # Battery idle or discharging too fast
                             available = margin
-                            self.logger.debug(f"Control (SOC≥95%): margin {margin:.0f}W")
+                            self.logger.debug(f"Control (SOC≥95%, idle): margin {margin:.0f}W")
                     else:
                         # Below 95%: strict solar-only, check margin
                         margin = pv_power - load_power
