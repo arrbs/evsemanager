@@ -159,23 +159,19 @@ class BatteryCalculator(PowerCalculator):
 
     def calculate_available_power(self, current_ev_watts: float = 0, for_display: bool = False) -> Optional[float]:
         """
-        Calculate excess solar power available for EV charging.
+        Calculate available power for EV charging.
         
-        Formula: PV - House Load (excluding EV) = Excess available for EV
+        VISUALIZATION (for_display=True):
+        - Battery < 95%: PV - House Load (excluding EV)
+        - Battery ≥ 95%: Current EV power (we allow battery discharge)
         
-        Note: The house load sensor includes the car's consumption. So for display:
-          Excess = PV - (House Load - Car Load)
-        
-        For control decisions, we use PV - Total Load to see the current margin.
+        CONTROL DECISIONS (for_display=False):
+        - Battery < 95%: PV - Total Load (to see margin for adjustment)
+        - Battery ≥ 95%: PV - Total Load + allowed discharge
         
         Args:
-            current_ev_watts: Current EV power consumption (to subtract from house load)
-            for_display: If True, exclude EV from load for visualization
-        
-        Logic:
-        - SOC < priority_soc: No excess (battery has priority)
-        - SOC ≥ priority_soc: Use PV - Load formula
-        - SOC ≥ 95%: Allow moderate battery discharge as bonus
+            current_ev_watts: Current EV power consumption
+            for_display: True for visualization, False for control decisions
         """
         soc = self.ha_api.get_state(self.battery_soc_entity)
         battery_power = self.ha_api.get_state(self.battery_power_entity)
@@ -195,7 +191,7 @@ class BatteryCalculator(PowerCalculator):
             self.logger.debug(f"Battery priority active (SOC {soc}% < {self.priority_soc}%)")
             return 0.0
         
-        # Calculate excess from PV and Load sensors
+        # Get PV and Load sensors
         total_pv_entity = self.config['sensors'].get('total_pv_entity')
         total_load_entity = self.config['sensors'].get('total_load_entity')
         
@@ -207,30 +203,37 @@ class BatteryCalculator(PowerCalculator):
                 pv_power = float(pv_power)
                 load_power = float(load_power)
                 
-                # House load includes the car's consumption but NOT battery charge/discharge
-                # True excess = PV - (Load - Car) + Battery charging power
-                # When battery is charging (negative normalized_power), that's excess we can use
-                # When battery is discharging (positive normalized_power), we're short on power
+                if for_display:
+                    # VISUALIZATION LOGIC
+                    if soc >= 95:
+                        # Show current EV power (we're allowing battery discharge)
+                        available = current_ev_watts
+                        self.logger.debug(f"Display (SOC≥95%): Showing current EV {available:.0f}W")
+                    else:
+                        # Show available solar: PV - House Load (excluding EV)
+                        house_load = load_power - current_ev_watts if current_ev_watts > 0 else load_power
+                        available = pv_power - house_load
+                        self.logger.debug(f"Display (SOC<95%): PV {pv_power:.0f}W - House {house_load:.0f}W = {available:.0f}W")
+                else:
+                    # CONTROL DECISION LOGIC
+                    if soc >= 95:
+                        # Allow moderate battery discharge (0-1000W)
+                        # Calculate margin with allowed discharge
+                        margin = pv_power - load_power
+                        if normalized_power > 0 and normalized_power <= self.target_discharge_max:
+                            # Currently discharging at acceptable rate - add as bonus
+                            available = margin + normalized_power
+                            self.logger.debug(f"Control (SOC≥95%): margin {margin:.0f}W + discharge {normalized_power:.0f}W = {available:.0f}W")
+                        else:
+                            available = margin
+                            self.logger.debug(f"Control (SOC≥95%): margin {margin:.0f}W")
+                    else:
+                        # Below 95%: strict solar-only, check margin
+                        margin = pv_power - load_power
+                        available = margin
+                        self.logger.debug(f"Control (SOC<95%): PV {pv_power:.0f}W - Load {load_power:.0f}W = {margin:.0f}W margin")
                 
-                house_only_load = load_power - current_ev_watts if current_ev_watts > 0 else load_power
-                excess = pv_power - house_only_load
-                
-                # Add battery charging power as available (it's excess solar)
-                # Subtract battery discharging power (we're short on solar)
-                excess -= normalized_power
-                
-                self.logger.debug(
-                    f"PV {pv_power:.0f}W - House {house_only_load:.0f}W - Battery {normalized_power:.0f}W = {excess:.0f}W available"
-                )
-                
-                # When battery is at/near full (≥95%) and discharging, allow moderate discharge as bonus
-                if soc >= 95 and normalized_power > 0 and normalized_power <= self.target_discharge_max:
-                    # Add it back as we're OK with this discharge
-                    bonus = min(normalized_power, self.target_discharge_max)
-                    excess += bonus
-                    self.logger.debug(f"Battery full, allowing {bonus:.0f}W discharge as bonus")
-                
-                return max(0, excess)
+                return max(0, available)
         
         # Fallback: if PV/Load sensors not available, use battery power as proxy
         self.logger.warning("PV/Load sensors not configured - using battery power fallback")

@@ -440,7 +440,13 @@ class EVSEManager:
         try:
             # Get current and target first to calculate EV load
             current_amps = self.charger.get_current() or 0
-            current_ev_watts = self.charger.amps_to_watts(current_amps)
+            charger_status = self.charger.get_status()
+            
+            # Only count EV watts if actually charging (not just set to a current)
+            if charger_status == ChargerStatus.CHARGING:
+                current_ev_watts = self.charger.amps_to_watts(current_amps)
+            else:
+                current_ev_watts = 0
             
             # Get available power for display (excludes EV from house load)
             available_power = self.power_manager.get_available_power(
@@ -636,14 +642,19 @@ class EVSEManager:
         current_amps = self.charger.get_current() or 0
         target_current = self.power_manager.commanded_current or current_amps
         charging_power = self.charger.get_power() if self.session_active else 0
-        current_ev_watts = self.charger.amps_to_watts(current_amps)
+        
+        # Only count EV watts if actually charging
+        if current_status == ChargerStatus.CHARGING:
+            current_ev_watts = self.charger.amps_to_watts(current_amps)
+        else:
+            current_ev_watts = 0
+            
         available_power = self.power_manager.get_available_power(current_ev_load=current_ev_watts)
         min_power = self.charger.get_min_power()
         charger_on = self.charger.is_on()
         insufficient_power = False
         if self.mode == 'auto':
-            # Get available power considering current EV consumption
-            current_ev_watts = self.charger.amps_to_watts(current_amps)
+            # Get available power considering current EV consumption (already calculated above)
             available_power_for_check = self.power_manager.get_available_power(current_ev_load=current_ev_watts)
             if available_power_for_check is None or available_power_for_check < min_power:
                 insufficient_power = True
