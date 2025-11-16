@@ -231,13 +231,16 @@ class BatteryCalculator(PowerCalculator):
                 else:
                     # CONTROL DECISION LOGIC
                     if soc >= 95:
-                        # Allow moderate battery discharge (0-1000W)
-                        # Calculate margin with allowed discharge
+                        # High SOC: allow using battery charge/discharge for EV
                         margin = pv_power - load_power
                         if normalized_power > 0 and normalized_power <= self.target_discharge_max:
-                            # Currently discharging at acceptable rate - add as bonus
+                            # Battery discharging at acceptable rate - add as available
                             available = margin + normalized_power
                             self.logger.debug(f"Control (SOC≥95%): margin {margin:.0f}W + discharge {normalized_power:.0f}W = {available:.0f}W")
+                        elif normalized_power < 0:
+                            # Battery charging - that power could go to EV instead
+                            available = margin + abs(normalized_power)
+                            self.logger.debug(f"Control (SOC≥95%): margin {margin:.0f}W + charging {abs(normalized_power):.0f}W = {available:.0f}W")
                         else:
                             available = margin
                             self.logger.debug(f"Control (SOC≥95%): margin {margin:.0f}W")
