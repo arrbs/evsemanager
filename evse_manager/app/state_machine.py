@@ -154,11 +154,54 @@ class DeterministicStateMachine:
 
     def tick(self, inputs: Inputs) -> Tuple[Optional[Decision], DerivedValues]:
         derived = self._derive(inputs)
+        self._detect_external_changes(inputs)
         self._sync_mode_state(derived.region, derived.cooldown_active)
         decision = self._evaluate_rules(inputs, derived)
         if decision:
             self.state = decision.new_state
         return decision, derived
+
+    def _detect_external_changes(self, inputs: Inputs) -> None:
+        """Detect if charger current was changed externally and resync state."""
+        # Only check if we're actively managing (not OFF and charger is on)
+        if self.state.evse_step_index == 0:
+            return
+        
+        if inputs.charger_current_a is None or inputs.charger_current_a < 1:
+            return
+        
+        # Check if actual current differs significantly from our expected step
+        expected_amps = EVSE_STEPS_AMPS[self.state.evse_step_index]
+        actual_amps = inputs.charger_current_a
+        diff = abs(expected_amps - actual_amps)
+        
+        # If difference is more than 2A, someone changed it externally
+        if diff > 2:
+            # Find the closest matching step
+            best_index = 0
+            min_diff = float('inf')
+            
+            for idx, step_amps in enumerate(EVSE_STEPS_AMPS):
+                step_diff = abs(step_amps - actual_amps)
+                if step_diff < min_diff:
+                    min_diff = step_diff
+                    best_index = idx
+            
+            # Update our state to match reality (within 3A tolerance)
+            if min_diff <= 3:
+                region = self._region_for_soc(inputs.batt_soc_percent)
+                if best_index == 0:
+                    mode_state = ModeState.OFF
+                else:
+                    mode_state = ModeState.MAIN_READY if region == "MAIN" else ModeState.PROBE_READY
+                
+                self.state = replace(
+                    self.state,
+                    evse_step_index=best_index,
+                    mode_state=mode_state,
+                    last_change_ts_s=inputs.now_s,
+                    pending_effect_ts_s=None,
+                )
 
     def _derive(self, inputs: Inputs) -> DerivedValues:
         target_region = self._region_for_soc(inputs.batt_soc_percent)

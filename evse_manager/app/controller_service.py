@@ -71,7 +71,29 @@ class ControlService:
     def _run_tick(self, now_s: float) -> None:
         prev_state = self.machine.state
         inputs = self.adapter.read_inputs(now_s)
+        
+        # Detect external changes before processing
+        if prev_state.evse_step_index != 0 and inputs.charger_current_a is not None:
+            expected_amps = EVSE_STEPS_AMPS[prev_state.evse_step_index]
+            if abs(expected_amps - inputs.charger_current_a) > 2:
+                self.logger.info(
+                    "Detected external current change: expected=%sA, actual=%sA",
+                    expected_amps,
+                    inputs.charger_current_a,
+                )
+        
         decision, derived = self.machine.tick(inputs)
+        
+        # Log if state changed due to external sync (no decision but state changed)
+        if not decision and prev_state.evse_step_index != self.machine.state.evse_step_index:
+            self.logger.info(
+                "Synchronized with external change: %sA→%sA (step %s→%s)",
+                EVSE_STEPS_AMPS[prev_state.evse_step_index],
+                EVSE_STEPS_AMPS[self.machine.state.evse_step_index],
+                prev_state.evse_step_index,
+                self.machine.state.evse_step_index,
+            )
+        
         if decision:
             self._log_transition(prev_state, decision, inputs)
             self.adapter.apply_decision(decision)
