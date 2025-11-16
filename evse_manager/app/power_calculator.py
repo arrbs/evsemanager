@@ -61,9 +61,14 @@ class PowerCalculator:
         total = sum(sample[1] for sample in self.power_history)
         return total / len(self.power_history)
     
-    def update(self) -> Optional[float]:
-        """Update and return available power."""
-        power = self.calculate_available_power()
+    def update(self, current_ev_watts: float = 0, for_display: bool = False) -> Optional[float]:
+        """Update and return available power.
+        
+        Args:
+            current_ev_watts: Current EV power consumption
+            for_display: If True, calculate for display (excluding EV from load)
+        """
+        power = self.calculate_available_power(current_ev_watts, for_display)
         
         if power is not None:
             now = time.time()
@@ -152,14 +157,25 @@ class BatteryCalculator(PowerCalculator):
         """Convert raw sensor value so positive means discharging."""
         return -battery_power if self.battery_power_charging_positive else battery_power
 
-    def calculate_available_power(self) -> Optional[float]:
+    def calculate_available_power(self, current_ev_watts: float = 0, for_display: bool = False) -> Optional[float]:
         """
-        Calculate available power based on battery state.
+        Calculate excess solar power available for EV charging.
+        
+        Formula: PV - House Load (excluding EV) = Excess available for EV
+        
+        Note: The house load sensor includes the car's consumption. So for display:
+          Excess = PV - (House Load - Car Load)
+        
+        For control decisions, we use PV - Total Load to see the current margin.
+        
+        Args:
+            current_ev_watts: Current EV power consumption (to subtract from house load)
+            for_display: If True, exclude EV from load for visualization
         
         Logic:
-        - SOC < priority_soc: No excess (battery priority)
-        - SOC < high_soc: Use battery charging rate as available power
-        - SOC >= high_soc: Try to maintain mild discharge (target_discharge range)
+        - SOC < priority_soc: No excess (battery has priority)
+        - SOC ≥ priority_soc: Use PV - Load formula
+        - SOC ≥ 95%: Allow moderate battery discharge as bonus
         """
         soc = self.ha_api.get_state(self.battery_soc_entity)
         battery_power = self.ha_api.get_state(self.battery_power_entity)
@@ -179,63 +195,50 @@ class BatteryCalculator(PowerCalculator):
             self.logger.debug(f"Battery priority active (SOC {soc}% < {self.priority_soc}%)")
             return 0.0
         
-        elif soc < self.high_soc:
-            # Battery still charging - available power is what's going into battery
-            if normalized_power < 0:
-                available = -normalized_power
-                self.logger.debug(f"Battery charging at {available}W (SOC {soc}%)")
-                return available
-            else:
-                # Battery discharging but below high threshold - reduce consumption
-                self.logger.debug(f"Battery discharging {normalized_power}W (SOC {soc}%)")
-                return 0.0
+        # Calculate excess from PV and Load sensors
+        total_pv_entity = self.config['sensors'].get('total_pv_entity')
+        total_load_entity = self.config['sensors'].get('total_load_entity')
         
+        if total_pv_entity and total_load_entity:
+            pv_power = self.ha_api.get_state(total_pv_entity)
+            load_power = self.ha_api.get_state(total_load_entity)
+            
+            if pv_power is not None and load_power is not None:
+                pv_power = float(pv_power)
+                load_power = float(load_power)
+                
+                # House load includes the car's consumption
+                # For display: show excess available = PV - (Load - Car)
+                # For control: show current margin = PV - Load (including car)
+                if for_display and current_ev_watts > 0:
+                    # Subtract car from load to show true available excess
+                    house_only_load = load_power - current_ev_watts
+                    excess = pv_power - house_only_load
+                    self.logger.debug(
+                        f"Display: PV {pv_power:.0f}W - (Load {load_power:.0f}W - EV {current_ev_watts:.0f}W) = {excess:.0f}W"
+                    )
+                else:
+                    # Control decision: use total load including car
+                    excess = pv_power - load_power
+                    self.logger.debug(
+                        f"Control: PV {pv_power:.0f}W - Load {load_power:.0f}W = {excess:.0f}W margin"
+                    )
+                
+                # When battery is full (≥95%), allow moderate discharge
+                if soc >= 95 and normalized_power > 0 and normalized_power <= self.target_discharge_max:
+                    excess += normalized_power
+                    self.logger.debug(f"Adding battery discharge {normalized_power:.0f}W")
+                
+                return max(0, excess)
+        
+        # Fallback: if PV/Load sensors not available, use battery power as proxy
+        self.logger.warning("PV/Load sensors not configured - using battery power fallback")
+        if normalized_power < 0:
+            # Battery charging - available power is what's going in
+            return -normalized_power
         else:
-            # SOC >= high_soc: Simple probing logic
-            # 1. Battery >95%: step up until it starts discharging
-            # 2. Normal: keep battery roughly stable (small discharge ok)
-            
-            if soc > 95:
-                # Battery full - probe upward until it discharges
-                # When battery at 0W, PV may be curtailed - keep probing to find actual solar limit
-                if normalized_power <= 0:
-                    # Not discharging - either charging or at 0W (curtailed PV)
-                    # Keep stepping up to discover actual solar capacity
-                    available = 5000  # Signal: keep stepping up
-                    if normalized_power < -100:
-                        self.logger.info(
-                            f"Battery >95% charging {-normalized_power}W - probing upward"
-                        )
-                else:
-                    # Battery discharging - we've exceeded actual solar, reduce EVSE
-                    available = self.target_discharge_max - normalized_power
-                    self.logger.info(
-                        f"Battery discharging {normalized_power}W - exceeded solar limit, reducing"
-                    )
-                return available
-            
-            else:
-                # Normal mode - keep battery roughly stable
-                # Target: small discharge (0-1500W)
-                if normalized_power < -500:
-                    # Charging too much - can increase EVSE
-                    available = -normalized_power + self.target_discharge_max
-                    self.logger.info(
-                        f"Battery charging {-normalized_power}W - can increase EVSE"
-                    )
-                elif normalized_power <= self.target_discharge_max:
-                    # In target range - small adjustments
-                    available = self.target_discharge_max - normalized_power
-                    self.logger.info(
-                        f"Battery at {normalized_power}W - in target range"
-                    )
-                else:
-                    # Discharging too much - need to decrease EVSE
-                    available = self.target_discharge_max - normalized_power  # Will be negative
-                    self.logger.info(
-                        f"Battery discharging {normalized_power}W - need to decrease EVSE"
-                    )
-                return available
+            # Battery discharging - no excess available
+            return 0.0
 
 
 class PowerManager:
@@ -328,7 +331,8 @@ class PowerManager:
         self.logger.debug(f"Predicted EV load: {predicted_power:.0f}W (commanded {self.commanded_current}A, {time_since_command:.0f}s ago)")
         return predicted_power
     
-    def get_available_power(self, voltage: float = 230, current_ev_load: float = 0) -> Optional[float]:
+    def get_available_power(self, voltage: float = 230, current_ev_load: float = 0, 
+                           for_display: bool = False) -> Optional[float]:
         """
         Get current available power for EV charging.
         
@@ -348,7 +352,8 @@ class PowerManager:
         Returns:
             Total available power budget for EV charging
         """
-        raw_power = self.calculator.update()
+        # Get power from calculator
+        raw_power = self.calculator.update(current_ev_watts=current_ev_load, for_display=for_display)
         
         if raw_power is not None:
             # Check for rapid changes indicating external load changes
@@ -361,22 +366,21 @@ class PowerManager:
             
             self.last_available_power = raw_power
             
-            # Add current EV consumption to get total available budget
-            # If EV is drawing 1.3kW and battery is charging at 1.7kW,
-            # we actually have 3.0kW available for the EV
-            total_available = raw_power + current_ev_load
+            # For display: return raw (already excludes EV from load)
+            if for_display:
+                return raw_power
+            
+            # For control: add current EV load to margin to get total budget
+            total_budget = raw_power + current_ev_load
             
             if current_ev_load > 100:
                 self.logger.debug(
-                    f"Available power: {raw_power:.0f}W + {current_ev_load:.0f}W (current EV) = {total_available:.0f}W total budget"
+                    f"Budget: {raw_power:.0f}W margin + {current_ev_load:.0f}W current = {total_budget:.0f}W total"
                 )
-            else:
-                self.logger.debug(f"Available power: {raw_power:.0f}W (no current EV load)")
             
-            return total_available
+            return total_budget
         else:
-            # If no raw power available (sensor error), return current consumption if any
-            return current_ev_load if current_ev_load > 0 else 0.0
+            return 0.0 if for_display else (current_ev_load if current_ev_load > 0 else 0.0)
     
     def get_target_current(self, charger_controller, current_amps: float) -> Optional[float]:
         """

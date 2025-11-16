@@ -439,8 +439,11 @@ class EVSEManager:
             current_amps = self.charger.get_current() or 0
             current_ev_watts = self.charger.amps_to_watts(current_amps)
             
-            # Get current power readings with EV load context
-            available_power = self.power_manager.get_available_power(current_ev_load=current_ev_watts)
+            # Get available power for display (excludes EV from house load)
+            available_power = self.power_manager.get_available_power(
+                current_ev_load=current_ev_watts, 
+                for_display=True
+            )
             
             sensors = self.config.get('sensors', {})
             pv_entity = sensors.get('total_pv_entity')
