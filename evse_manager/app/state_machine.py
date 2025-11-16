@@ -211,12 +211,13 @@ class DeterministicStateMachine:
         if inputs.inverter_power_w is not None:
             inverter_over = inputs.inverter_power_w > self.config.safe_inverter_max_w
         excess = None
-        if (
-            target_region == "MAIN"
-            and inputs.pv_power_w is not None
-            and inputs.inverter_power_w is not None
-        ):
-            excess = inputs.pv_power_w - inputs.inverter_power_w
+        if target_region == "MAIN":
+            if inputs.pv_power_w is not None and inputs.inverter_power_w is not None:
+                excess = inputs.pv_power_w - inputs.inverter_power_w
+            elif inputs.batt_power_w is not None:
+                # Fallback: infer excess from battery flow when PV sensor unavailable.
+                # Positive battery power means discharge (deficit), negative means charging (surplus).
+                excess = -inputs.batt_power_w
         waiting_timed_out = False
         if self.state.waiting_since_ts_s is not None:
             waiting_timed_out = (inputs.now_s - self.state.waiting_since_ts_s) > self.config.waiting_timeout_s

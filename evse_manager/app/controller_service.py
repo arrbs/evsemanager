@@ -146,7 +146,7 @@ class ControlService:
         
         # UI-specific display values for available power and PV
         ui_available_for_ev = self._ui_available_for_ev(inputs, current_watts, derived.region)
-        ui_pv_display = inputs.pv_power_w
+        ui_pv_display = self._ui_pv_display(inputs)
         
         timestamp = datetime.now(timezone.utc).isoformat()
         # Use UI values for history display on graph
@@ -220,17 +220,32 @@ class ControlService:
             return None
         
         # When SOC < 95% (MAIN region): Total PV - (Inverter - Current EVSE)
-        if inputs.pv_power_w is None or inputs.inverter_power_w is None:
+        pv_power = inputs.pv_power_w
+        inverter_power = inputs.inverter_power_w
+        if pv_power is None or inverter_power is None:
+            # Fall back to battery flow if PV sensor is unavailable. Positive battery power
+            # means we are discharging (deficit), negative means charging (surplus).
+            if inputs.batt_power_w is not None:
+                return -inputs.batt_power_w
             self.logger.debug(
                 "Cannot calculate UI available power: pv=%s, inverter=%s",
                 inputs.pv_power_w,
                 inputs.inverter_power_w,
             )
             return None
-        
+
         # Available = PV - (Inverter - EVSE) = PV - Inverter + EVSE
-        available = inputs.pv_power_w - (inputs.inverter_power_w - current_evse_watts)
+        available = pv_power - (inverter_power - current_evse_watts)
         return available
+
+    def _ui_pv_display(self, inputs: Inputs) -> Optional[float]:
+        """Return PV value for UI, falling back to battery flow when needed."""
+        if inputs.pv_power_w is not None:
+            return inputs.pv_power_w
+        if inputs.batt_power_w is not None:
+            # Negative battery power implies PV/house surplus; display absolute value for context.
+            return max(0.0, -inputs.batt_power_w)
+        return None
 
     def _append_history(
         self,
