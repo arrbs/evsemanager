@@ -672,10 +672,12 @@ class EVSEManager:
         charger_on = self.charger.is_on()
         insufficient_power = False
         if self.mode == 'auto':
-            # Get available power considering current EV consumption (already calculated above)
-            available_power_for_check = self.power_manager.get_available_power(current_ev_load=current_ev_watts)
-            if available_power_for_check is None or available_power_for_check < min_power:
-                insufficient_power = True
+            # In aggressive discharge mode, never report insufficient power (battery handles deficit)
+            if not self.power_manager.is_aggressive_discharge_mode():
+                # Get available power considering current EV consumption (already calculated above)
+                available_power_for_check = self.power_manager.get_available_power(current_ev_load=current_ev_watts)
+                if available_power_for_check is None or available_power_for_check < min_power:
+                    insufficient_power = True
 
         # Capture inverter telemetry for UI visibility
         inverter_power = None
