@@ -163,10 +163,6 @@ class DeterministicStateMachine:
 
     def _detect_external_changes(self, inputs: Inputs) -> None:
         """Detect if charger current was changed externally and resync state."""
-        # Only check if we're actively managing (not OFF and charger is on)
-        if self.state.evse_step_index == 0:
-            return
-        
         if inputs.charger_current_a is None or inputs.charger_current_a < 1:
             return
         
@@ -175,7 +171,9 @@ class DeterministicStateMachine:
         actual_amps = inputs.charger_current_a
         diff = abs(expected_amps - actual_amps)
         
-        # If difference is more than 2A, someone changed it externally
+        # If we're OFF but the charger is delivering current, or difference > 2A, resync
+        if self.state.evse_step_index == 0 and actual_amps >= 1:
+            diff = actual_amps  # force resync logic below
         if diff > 2:
             # Find the closest matching step
             best_index = 0
