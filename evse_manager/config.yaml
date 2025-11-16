@@ -1,5 +1,5 @@
 name: EVSE Manager
-version: "1.2.0"
+version: "1.2.1"
 slug: evse_manager
 description: Deterministic EVSE control loop with neon web dashboard
 url: "https://github.com/arrbs/evsemanager"
