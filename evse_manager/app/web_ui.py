@@ -32,14 +32,11 @@ HTML_TEMPLATE = """
         .header {
             background: white;
             padding: 20px;
-            border-radius: 8px;
+            border-radius: 12px;
             margin-bottom: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 16px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.06);
         }
+        .header-tagline { color:#777; font-size:13px; }
         body.mode-auto .header {
             box-shadow: 0 4px 25px rgba(76, 175, 80, 0.35);
             border: 2px solid rgba(76, 175, 80, 0.4);
@@ -93,8 +90,88 @@ HTML_TEMPLATE = """
         .state-chip.ready { background: #e8f5e9; color: #2e7d32; }
         .state-chip.idle { background: #f5f5f5; color: #666; }
         .state-chip.inverter_limit { background: #fdecea; color: #c62828; }
+        .hero-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .hero-card {
+            padding: 24px;
+            border-radius: 16px;
+            background: white;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.08);
+        }
+        .hero-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .hero-title { font-size: 16px; text-transform: uppercase; letter-spacing: 0.1em; color: #777; }
+        .hero-status { font-size: 28px; font-weight: 700; color: #222; margin-top: 6px; }
+        .hero-pills { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+        .hero-metrics {
+            display: flex;
+            gap: 20px;
+            flex-wrap: wrap;
+        }
+        .hero-metric {
+            flex: 1;
+            min-width: 180px;
+            background: #f7f8fa;
+            border-radius: 12px;
+            padding: 16px;
+        }
+        .hero-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: #111;
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+        }
         
-        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .metric-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 20px;
+        }
+        .metric-grid.three { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+        .card-heading {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+        .battery-priority-pill {
+            padding: 6px 12px;
+            border-radius: 999px;
+            background: #ede7f6;
+            color: #4527a0;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        .controls-card { padding: 24px; }
+        .control-body { display: flex; flex-direction: column; gap: 18px; margin-top: 16px; }
+        .action-row { display: flex; gap: 12px; flex-wrap: wrap; }
+        .alert-banner {
+            display: none;
+            margin-top: 16px;
+            padding: 14px 16px;
+            border-radius: 10px;
+            background: #fff4e5;
+            color: #a66300;
+            font-weight: 600;
+        }
         .card {
             background: white;
             padding: 20px;
@@ -121,12 +198,6 @@ HTML_TEMPLATE = """
         .metric-value { color: #333; font-size: 20px; font-weight: 600; }
         .metric-unit { color: #999; font-size: 14px; margin-left: 4px; }
         
-        .controls {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            align-items: center;
-        }
         button {
             padding: 10px 20px;
             border: none;
@@ -266,16 +337,22 @@ HTML_TEMPLATE = """
         .chip-warning { background: #fff3cd; color: #856404; }
         .chip-danger { background: #fdecea; color: #c62828; }
         .status-note {
-            margin-top: 10px;
-            padding: 10px 14px;
-            border-radius: 6px;
+            margin-top: 14px;
+            padding: 14px 16px;
+            border-radius: 10px;
             font-size: 13px;
-            background: #fffbe6;
-            color: #8f6d00;
+            background: #f5f0ff;
+            color: #4a2b8c;
             display: none;
         }
-        .manual-only { display: none; gap: 10px; align-items: center; }
-        body.mode-manual .manual-only { display: inline-flex; }
+        .manual-only {
+            display: none;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .manual-label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; color: #777; }
+        .manual-only select { width: 100%; }
+        body.mode-manual .manual-only { display: flex; }
     </style>
 </head>
 <body>
@@ -283,12 +360,7 @@ HTML_TEMPLATE = """
         <div class="header">
             <div>
                 <h1>⚡ EVSE Manager</h1>
-                <div style="color:#777; font-size:13px;">Smart solar charging controller</div>
-            </div>
-            <div class="header-meta">
-                <span class="mode-chip manual" id="mode-chip">MODE</span>
-                <span class="state-chip" id="auto-state-chip"></span>
-                <span class="status-badge" id="status-badge">Loading...</span>
+                <div class="header-tagline">Smart solar charging controller</div>
             </div>
         </div>
         
@@ -339,139 +411,106 @@ HTML_TEMPLATE = """
             </div>
         </div>
         
-        <div class="grid">
-            <div class="card">
-                <h2>Current Status</h2>
-                <div class="metric">
-                    <span class="metric-label">Mode</span>
-                    <span class="metric-value" id="mode">-</span>
+        <div class="hero-grid">
+            <div class="card hero-card">
+                <div class="hero-top">
+                    <div>
+                        <div class="hero-title">Live Session</div>
+                        <div class="hero-status" id="charger-status">-</div>
+                    </div>
+                    <div class="hero-pills">
+                        <span class="mode-chip manual" id="mode-chip">MODE</span>
+                        <span class="state-chip" id="auto-state-chip"></span>
+                        <span class="status-badge" id="status-badge">Loading...</span>
+                    </div>
                 </div>
-                <div class="metric">
-                    <span class="metric-label">Charger Status</span>
-                    <span class="metric-value" id="charger-status">-</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Current</span>
-                    <span class="metric-value">
-                        <span id="current-amps">-</span>
-                        <span class="metric-unit">A</span>
-                    </span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Charging Power</span>
-                    <span class="metric-value">
-                        <span id="charging-power">-</span>
-                        <span class="metric-unit">W</span>
-                    </span>
-                </div>
-                <div class="status-note" id="status-note"></div>
-            </div>
-            
-            <div class="card">
-                <h2>Solar Power</h2>
-                <div class="metric">
-                    <span class="metric-label">Available</span>
-                    <span class="metric-value">
-                        <span id="available-power">-</span>
-                        <span class="metric-unit">W</span>
-                    </span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Target Current</span>
-                    <span class="metric-value">
-                        <span id="target-current">-</span>
-                        <span class="metric-unit">A</span>
-                    </span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Inverter Power</span>
-                    <span class="metric-value">
-                        <span id="inverter-power">-</span>
-                        <span class="metric-unit">W</span>
-                    </span>
-                </div>
-                <div class="metric" id="inverter-limit-banner" style="display: none; background: #fff3cd; margin: 10px -20px -20px; padding: 15px 20px; border-radius: 0 0 8px 8px;">
-                    <span style="color: #856404; font-weight: 600;">⚠️ Inverter limit reached</span>
+                <div class="hero-metrics">
+                    <div class="hero-metric">
+                        <div class="metric-label">Current</div>
+                        <div class="hero-value">
+                            <span id="current-amps">-</span>
+                            <span class="metric-unit">A</span>
+                        </div>
+                        <div class="metric-subtext">Target <span id="target-current-hero">-</span>A</div>
+                    </div>
+                    <div class="hero-metric">
+                        <div class="metric-label">Charging Power</div>
+                        <div class="hero-value">
+                            <span id="charging-power">-</span>
+                            <span class="metric-unit">W</span>
+                        </div>
+                        <div class="metric-subtext">Mode <span id="mode">-</span></div>
+                    </div>
+                    <div class="hero-metric">
+                        <div class="metric-label">Session Energy</div>
+                        <div class="hero-value">
+                            <span id="session-energy">-</span>
+                            <span class="metric-unit">kWh</span>
+                        </div>
+                        <div class="metric-subtext">Duration <span id="session-duration">-</span> • Solar <span id="session-solar">-</span>%</div>
+                    </div>
                 </div>
             </div>
-            
-            <div class="card" id="battery-card">
-                <h2>Battery & Limits</h2>
-                <div class="metric">
-                    <span class="metric-label">Battery SOC</span>
-                    <span class="metric-value">
-                        <span id="battery-soc">-</span>
-                        <span class="metric-unit">%</span>
-                    </span>
+            <div class="card battery-card" id="battery-card">
+                <div class="card-heading">
+                    <h2>House Battery</h2>
+                    <span class="battery-priority-pill" id="battery-priority">-</span>
                 </div>
-                <div class="metric">
-                    <span class="metric-label">Battery Flow</span>
-                    <span class="metric-value">
-                        <span id="battery-power">-</span>
-                        <span class="metric-unit">W</span>
-                    </span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Direction</span>
-                    <span class="metric-value" id="battery-direction">-</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Priority</span>
-                    <span class="metric-value" id="battery-priority">-</span>
-                </div>
-                <div class="chip-list" id="limiting-factors">
-                    <span class="chip">No limits active</span>
-                </div>
-            </div>
-            
-            <div class="card">
-                <h2>Current Session</h2>
-                <div class="metric">
-                    <span class="metric-label">Duration</span>
-                    <span class="metric-value" id="session-duration">-</span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Energy</span>
-                    <span class="metric-value">
-                        <span id="session-energy">-</span>
-                        <span class="metric-unit">kWh</span>
-                    </span>
-                </div>
-                <div class="metric">
-                    <span class="metric-label">Solar %</span>
-                    <span class="metric-value">
-                        <span id="session-solar">-</span>
-                        <span class="metric-unit">%</span>
-                    </span>
+                <div class="metric-grid">
+                    <div>
+                        <div class="metric-label">State of Charge</div>
+                        <div class="hero-value">
+                            <span id="battery-soc">-</span>
+                            <span class="metric-unit">%</span>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="metric-label">Flow</div>
+                        <div class="hero-value">
+                            <span id="battery-power">-</span>
+                            <span class="metric-unit">W</span>
+                        </div>
+                        <div class="metric-subtext" id="battery-direction">-</div>
+                    </div>
+                    <div>
+                        <div class="metric-label">Guard</div>
+                        <div class="hero-value"><span id="battery-guard-display">--%</span></div>
+                        <div class="metric-subtext">Minimum SOC</div>
+                    </div>
                 </div>
             </div>
         </div>
-        
-        <div class="card">
-            <h2>Controls</h2>
-            <div class="controls">
-                <div class="pill-toggle">
-                    <button id="mode-manual-btn" class="active" onclick="handleModeButton('manual')">Manual</button>
-                    <button id="mode-auto-btn" onclick="handleModeButton('auto')">Auto</button>
+
+        <div class="dashboard-grid">
+            <div class="card controls-card">
+                <div class="card-heading">
+                    <h2>Controls</h2>
+                    <div class="pill-toggle">
+                        <button id="mode-manual-btn" class="active" onclick="handleModeButton('manual')">Manual</button>
+                        <button id="mode-auto-btn" onclick="handleModeButton('auto')">Auto</button>
+                    </div>
                 </div>
-                <div class="manual-only" id="manual-controls">
-                    <select id="manual-current" onchange="setManualCurrent(this.value)">
-                        <option value="6">6A</option>
-                        <option value="8">8A</option>
-                        <option value="10">10A</option>
-                        <option value="13">13A</option>
-                        <option value="16">16A</option>
-                        <option value="20">20A</option>
-                        <option value="24">24A</option>
-                    </select>
-                    <button class="btn-success" onclick="startCharging()">Start Charging</button>
-                </div>
-                <button class="btn-danger" onclick="stopCharging()">Stop Charging</button>
-                <div class="flag-stack">
-                    <div class="flag-control threshold-control">
+                <div class="control-body">
+                    <div class="manual-only" id="manual-controls">
+                        <span class="manual-label">Manual current</span>
+                        <select id="manual-current" onchange="setManualCurrent(this.value)">
+                            <option value="6">6A</option>
+                            <option value="8">8A</option>
+                            <option value="10">10A</option>
+                            <option value="13">13A</option>
+                            <option value="16">16A</option>
+                            <option value="20">20A</option>
+                            <option value="24">24A</option>
+                        </select>
+                    </div>
+                    <div class="action-row">
+                        <button class="btn-success" onclick="startCharging()">Start Charging</button>
+                        <button class="btn-danger" onclick="stopCharging()">Stop Charging</button>
+                    </div>
+                    <div class="flag-control threshold-control" style="width:100%;">
                         <div class="flag-text">
                             <div class="flag-title">Battery Minimum SOC</div>
-                            <div class="flag-subtitle">Auto mode waits until the house battery reaches this SOC before charging. Current: <span id="battery-priority-note">--%</span></div>
+                            <div class="flag-subtitle">Auto mode pauses EV charging until the house battery reaches this SOC. Current guard: <span id="battery-priority-note">--%</span></div>
                         </div>
                         <div class="threshold-inputs">
                             <input type="number" id="battery-priority-input" min="0" max="100" step="1" value="80" oninput="handleBatteryPriorityInput(this.value)">
@@ -481,11 +520,46 @@ HTML_TEMPLATE = """
                     </div>
                 </div>
             </div>
-        </div>
-        
-        <div class="grid">
+
+            <div class="card" id="energy-card">
+                <h2>Solar & Inverter</h2>
+                <div class="metric-grid three">
+                    <div>
+                        <div class="metric-label">Available Solar</div>
+                        <div class="hero-value">
+                            <span id="available-power">-</span>
+                            <span class="metric-unit">W</span>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="metric-label">Target Current</div>
+                        <div class="hero-value">
+                            <span id="target-current">-</span>
+                            <span class="metric-unit">A</span>
+                        </div>
+                        <div class="metric-subtext">Commanded amps</div>
+                    </div>
+                    <div>
+                        <div class="metric-label">Inverter Output</div>
+                        <div class="hero-value">
+                            <span id="inverter-power">-</span>
+                            <span class="metric-unit">W</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="alert-banner" id="inverter-limit-banner">⚠️ Inverter limit reached</div>
+            </div>
+
+            <div class="card limits-card">
+                <h2>System Intent</h2>
+                <div class="chip-list" id="limiting-factors">
+                    <span class="chip">No limits active</span>
+                </div>
+                <div class="status-note" id="status-note"></div>
+            </div>
+
             <div class="card">
-                <h2>Statistics</h2>
+                <h2>Lifetime Stats</h2>
                 <div class="metric">
                     <span class="metric-label">Total Sessions</span>
                     <span class="metric-value" id="total-sessions">-</span>
@@ -508,7 +582,7 @@ HTML_TEMPLATE = """
                     </span>
                 </div>
             </div>
-            
+
             <div class="card">
                 <h2>Recent Sessions</h2>
                 <div class="session-list" id="session-list">
@@ -578,6 +652,10 @@ HTML_TEMPLATE = """
             const note = document.getElementById('battery-priority-note');
             if (note) {
                 note.textContent = `${value}%`;
+            }
+            const guard = document.getElementById('battery-guard-display');
+            if (guard) {
+                guard.textContent = `${value}%`;
             }
         }
 
@@ -719,7 +797,15 @@ HTML_TEMPLATE = """
             
             // Solar power
             document.getElementById('available-power').textContent = data.available_power?.toFixed(0) || '-';
-            document.getElementById('target-current').textContent = data.target_current?.toFixed(1) || '-';
+            const targetCurrentValue = data.target_current?.toFixed(1) || '-';
+            const targetPrimary = document.getElementById('target-current');
+            if (targetPrimary) {
+                targetPrimary.textContent = targetCurrentValue;
+            }
+            const targetHeroDisplay = document.getElementById('target-current-hero');
+            if (targetHeroDisplay) {
+                targetHeroDisplay.textContent = targetCurrentValue;
+            }
             document.getElementById('inverter-power').textContent = data.inverter_power?.toFixed(0) || '-';
             const inverterBanner = document.getElementById('inverter-limit-banner');
             inverterBanner.style.display = data.inverter_limiting ? 'flex' : 'none';
@@ -881,6 +967,10 @@ HTML_TEMPLATE = """
             const note = document.getElementById('battery-priority-note');
             if (note) {
                 note.textContent = Number.isNaN(numeric) ? '--%' : `${numeric}%`;
+            }
+            const guard = document.getElementById('battery-guard-display');
+            if (guard) {
+                guard.textContent = Number.isNaN(numeric) ? '--%' : `${numeric}%`;
             }
         }
 
