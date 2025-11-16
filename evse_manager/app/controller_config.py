@@ -98,10 +98,14 @@ def load_runtime_config(path: Path = Path("/data/options.json")) -> RuntimeConfi
         line_voltage_v=float(_extract("line_voltage_v", 230)),
         soc_main_max=float(_extract("soc_main_max", 95.0)),
         soc_probe_min=float(_extract("soc_probe_min", 90.0)),
+        soc_target=float(_extract("soc_target", 95.0)),
+        soc_hysteresis=float(_extract("soc_hysteresis", 1.0)),
         soc_conservative_below=float(_extract("soc_conservative_below", 94.0)),
         small_discharge_margin_w=float(_extract("small_discharge_margin_w", 200)),
         conservative_charge_target_w=float(_extract("conservative_charge_target_w", 100)),
         probe_max_discharge_w=float(_extract("probe_max_discharge_w", 1000)),
+        probe_charge_margin_w=float(_extract("probe_charge_margin_w", 50)),
+        probe_discharge_margin_w=float(_extract("probe_discharge_margin_w", 200)),
         inverter_limit_w=float(
             _extract(
                 "inverter_limit_w",

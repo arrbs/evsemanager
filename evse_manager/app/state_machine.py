@@ -26,10 +26,14 @@ class ControllerConfig:
     line_voltage_v: float = 230.0
     soc_main_max: float = 95.0
     soc_probe_min: float = 90.0
+    soc_target: float = 95.0
+    soc_hysteresis: float = 1.0
     soc_conservative_below: float = 94.0
     small_discharge_margin_w: float = 200.0
     conservative_charge_target_w: float = 100.0
     probe_max_discharge_w: float = 1000.0
+    probe_charge_margin_w: float = 50.0
+    probe_discharge_margin_w: float = 200.0
     inverter_limit_w: float = 8000.0
     inverter_margin_w: float = 500.0
     cooldown_s: float = 5.0
@@ -400,18 +404,50 @@ class DeterministicStateMachine:
             return None
         if self.state.evse_step_index == 0:
             return None
-        if batt_power <= 0:
-            if (
+        soc = inputs.batt_soc_percent
+        target = self.config.soc_target
+        hysteresis = self.config.soc_hysteresis
+        if soc is None:
+            soc = target
+
+        def can_step_up() -> bool:
+            return (
                 self.state.evse_step_index < len(EVSE_STEPS_AMPS) - 1
                 and derived.effect_ready
                 and self._inverter_safe(inputs, self.state.evse_step_index)
-            ):
-                return self._set_step(inputs, self.state.evse_step_index + 1, "probe_step_up")
+            )
+
+        def step_down(reason: str) -> Optional[Decision]:
+            next_index = max(0, self.state.evse_step_index - 1)
+            if next_index == self.state.evse_step_index:
+                return None
+            return self._set_step(inputs, next_index, reason)
+
+        # Hard safety: never allow discharge beyond probe_max_discharge_w
+        if batt_power >= self.config.probe_max_discharge_w:
+            return step_down("probe_max_discharge")
+
+        below_band = soc <= (target - hysteresis)
+        above_band = soc >= (target + hysteresis)
+
+        if above_band:
+            return step_down("probe_soc_high_step_down")
+
+        if below_band:
+            if can_step_up():
+                return self._set_step(inputs, self.state.evse_step_index + 1, "probe_soc_low_step_up")
             return None
-        if 0 < batt_power <= self.config.probe_max_discharge_w:
+
+        # Within SOC band: chase small surplus/deficit using battery power margins
+        if batt_power <= -self.config.probe_charge_margin_w:
+            if can_step_up():
+                return self._set_step(inputs, self.state.evse_step_index + 1, "probe_charge_margin_step_up")
             return None
-        next_index = max(0, self.state.evse_step_index - 1)
-        return self._set_step(inputs, next_index, "probe_step_down")
+
+        if batt_power >= self.config.probe_discharge_margin_w:
+            return step_down("probe_discharge_margin_step_down")
+
+        return None
 
     def _inverter_safe(self, inputs: Inputs, index: int) -> bool:
         if inputs.inverter_power_w is None:
