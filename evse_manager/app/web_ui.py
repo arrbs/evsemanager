@@ -227,37 +227,32 @@ HTML_TEMPLATE = """
             min-width: auto;
             flex: 0 0 auto;
         }
+        .threshold-control {
+            flex-wrap: wrap;
+            border-radius: 16px;
+            gap: 16px;
+        }
         .flag-text { display: flex; flex-direction: column; }
         .flag-stack { display: flex; flex-direction: row; gap: 12px; width: auto; align-items: center; flex: 0 0 auto; }
         .flag-title { font-size: 14px; font-weight: 600; color: #333; }
         .flag-subtitle { font-size: 11px; color: #777; margin-top: 2px; max-width: 220px; }
-        .switch-toggle { position: relative; display: inline-block; width: 48px; height: 26px; }
-        .switch-toggle input { display: none; }
-        .switch-toggle .slider {
-            position: absolute;
-            cursor: pointer;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: #ccc;
-            transition: 0.2s;
-            border-radius: 999px;
+        .threshold-inputs {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
-        .switch-toggle .slider:before {
-            position: absolute;
-            content: "";
-            height: 20px;
-            width: 20px;
-            left: 3px;
-            bottom: 3px;
-            background-color: white;
-            transition: 0.2s;
-            border-radius: 50%;
-            box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+        .threshold-inputs input[type="number"] {
+            width: 80px;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
         }
-        .switch-toggle input:checked + .slider { background: linear-gradient(135deg, #4caf50, #2e7d32); }
-        .switch-toggle input:checked + .slider:before { transform: translateX(22px); }
+        .threshold-inputs .threshold-unit {
+            font-size: 14px;
+            font-weight: 600;
+            color: #555;
+        }
         .metric-subtext { display: block; font-size: 12px; color: #888; margin-top: 4px; max-width: 220px; }
         .chip-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
         .chip {
@@ -473,15 +468,16 @@ HTML_TEMPLATE = """
                 </div>
                 <button class="btn-danger" onclick="stopCharging()">Stop Charging</button>
                 <div class="flag-stack">
-                    <div class="flag-control">
+                    <div class="flag-control threshold-control">
                         <div class="flag-text">
-                            <div class="flag-title">Battery Priority</div>
-                            <div class="flag-subtitle" id="battery-priority-note">Pause EV charging to refill the house battery.</div>
+                            <div class="flag-title">Battery Minimum SOC</div>
+                            <div class="flag-subtitle">Auto mode waits until the house battery reaches this SOC before charging. Current: <span id="battery-priority-note">--%</span></div>
                         </div>
-                        <label class="switch-toggle">
-                            <input type="checkbox" id="battery-priority-toggle" onchange="handleBatteryPriorityToggle(this.checked)">
-                            <span class="slider"></span>
-                        </label>
+                        <div class="threshold-inputs">
+                            <input type="number" id="battery-priority-input" min="0" max="100" step="1" value="80" oninput="handleBatteryPriorityInput(this.value)">
+                            <span class="threshold-unit">%</span>
+                            <button class="btn-secondary" id="battery-priority-save" data-independent="true" onclick="handleBatteryPrioritySave()">Save</button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -525,7 +521,6 @@ HTML_TEMPLATE = """
     <script>
         const LIMITING_LABELS = {
             battery_priority: 'Battery Priority',
-            battery_priority_override: 'Battery Priority (Manual)',
             inverter_limit: 'Inverter Limit',
             grace_period: 'Grace Period',
             insufficient_power: 'Insufficient Solar',
@@ -535,11 +530,11 @@ HTML_TEMPLATE = """
             vehicle_charged: 'Vehicle Charged'
         };
         let currentMode = null;
-        let batteryPriorityOverride = false;
         let pendingMode = null;
         let pendingModeTimestamp = 0;
-        let pendingBatteryPriority = null;
-        let pendingBatteryTimestamp = 0;
+        let currentBatteryPrioritySoc = null;
+        let pendingBatteryPrioritySoc = null;
+        let pendingBatterySocTimestamp = 0;
         const PENDING_TIMEOUT_MS = 6000;
 
         function pendingExpired(timestamp) {
@@ -571,24 +566,29 @@ HTML_TEMPLATE = """
             document.querySelectorAll('.pill-toggle button').forEach(btn => { btn.disabled = disabled; });
         }
 
-        function applyBatteryPriorityState(enabled) {
-            batteryPriorityOverride = !!enabled;
-            const priorityToggle = document.getElementById('battery-priority-toggle');
-            if (priorityToggle) {
-                priorityToggle.checked = batteryPriorityOverride;
+        function applyBatteryPrioritySoc(value) {
+            if (typeof value !== 'number' || Number.isNaN(value)) {
+                return;
             }
-            const priorityNote = document.getElementById('battery-priority-note');
-            if (priorityNote) {
-                priorityNote.textContent = batteryPriorityOverride
-                    ? 'Manual battery priority is holding EV charging.'
-                    : 'Pause EV charging to refill the house battery.';
+            currentBatteryPrioritySoc = value;
+            const input = document.getElementById('battery-priority-input');
+            if (input && document.activeElement !== input) {
+                input.value = value;
+            }
+            const note = document.getElementById('battery-priority-note');
+            if (note) {
+                note.textContent = `${value}%`;
             }
         }
 
-        function setBatteryToggleDisabled(disabled) {
-            const toggle = document.getElementById('battery-priority-toggle');
-            if (toggle) {
-                toggle.disabled = disabled;
+        function setBatterySocControlsDisabled(disabled) {
+            const input = document.getElementById('battery-priority-input');
+            const saveButton = document.getElementById('battery-priority-save');
+            if (input) {
+                input.disabled = disabled;
+            }
+            if (saveButton) {
+                saveButton.disabled = disabled;
             }
         }
 
@@ -672,13 +672,13 @@ HTML_TEMPLATE = """
                     autoChip.title = '';
                 }
             }
-            const allowBatteryUpdate = pendingBatteryPriority === null
-                || pendingExpired(pendingBatteryTimestamp)
-                || !!data.battery_priority_override === pendingBatteryPriority;
-            if (allowBatteryUpdate) {
-                applyBatteryPriorityState(data.battery_priority_override);
-                if (pendingBatteryPriority !== null && !!data.battery_priority_override === pendingBatteryPriority) {
-                    pendingBatteryPriority = null;
+            const allowBatterySocUpdate = pendingBatteryPrioritySoc === null
+                || pendingExpired(pendingBatterySocTimestamp)
+                || data.battery_priority_soc === pendingBatteryPrioritySoc;
+            if (allowBatterySocUpdate && typeof data.battery_priority_soc === 'number') {
+                applyBatteryPrioritySoc(data.battery_priority_soc);
+                if (pendingBatteryPrioritySoc !== null && data.battery_priority_soc === pendingBatteryPrioritySoc) {
+                    pendingBatteryPrioritySoc = null;
                 }
             }
             document.getElementById('charger-status').textContent = data.charger_status || '-';
@@ -696,8 +696,6 @@ HTML_TEMPLATE = """
                     } else {
                         noteText = 'Battery priority is holding charging until SOC recovers.';
                     }
-                } else if (data.auto_pause_reason === 'battery_priority_override') {
-                    noteText = 'You turned on battery priority, so EV charging will stay paused.';
                 } else if (data.auto_pause_reason === 'inverter_limit') {
                     noteText = 'Auto paused because the inverter is at its limit, so the charger turned off immediately.';
                 } else if (data.auto_pause_reason === 'car_unplugged') {
@@ -821,9 +819,12 @@ HTML_TEMPLATE = """
         }
         
         function setControlsDisabled(disabled) {
-            document.querySelectorAll('button').forEach(btn => { btn.disabled = disabled; });
+            document.querySelectorAll('button').forEach(btn => {
+                if (!btn.dataset.independent) {
+                    btn.disabled = disabled;
+                }
+            });
             document.querySelectorAll('select').forEach(sel => { sel.disabled = disabled; });
-            document.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.disabled = disabled; });
         }
         
         const ingressMatch = window.location.pathname.match(/^\/api\/hassio_ingress\/[A-Za-z0-9_-]+/);
@@ -875,35 +876,55 @@ HTML_TEMPLATE = """
             setMode(mode);
         }
 
-        async function setBatteryPriority(enabled) {
-            setBatteryToggleDisabled(true);
-            applyBatteryPriorityState(enabled);
-            pendingBatteryPriority = !!enabled;
-            pendingBatteryTimestamp = Date.now();
-            try {
-                const response = await apiFetch('/api/battery_priority', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled })
-                });
-                if (!response.ok) throw new Error('Failed to update battery priority');
-                showSuccess(enabled ? 'Battery priority enabled' : 'Battery priority disabled');
-                await fetchStatus();
-            } catch (error) {
-                console.error('Error updating battery priority:', error);
-                showError('Failed to update battery priority');
-                pendingBatteryPriority = null;
-                await fetchStatus();
-            } finally {
-                setBatteryToggleDisabled(false);
+        function handleBatteryPriorityInput(value) {
+            const numeric = parseInt(value, 10);
+            const note = document.getElementById('battery-priority-note');
+            if (note) {
+                note.textContent = Number.isNaN(numeric) ? '--%' : `${numeric}%`;
             }
         }
 
-        function handleBatteryPriorityToggle(enabled) {
-            if (batteryPriorityOverride === enabled) {
+        function handleBatteryPrioritySave() {
+            const input = document.getElementById('battery-priority-input');
+            if (!input) {
                 return;
             }
-            setBatteryPriority(enabled);
+            const value = parseInt(input.value, 10);
+            if (Number.isNaN(value)) {
+                showError('Enter a valid SOC between 0% and 100%.');
+                return;
+            }
+            const clamped = Math.min(100, Math.max(0, value));
+            if (clamped !== value) {
+                input.value = clamped;
+            }
+            if (currentBatteryPrioritySoc === clamped && pendingBatteryPrioritySoc === null) {
+                return;
+            }
+            setBatteryPrioritySoc(clamped);
+        }
+
+        async function setBatteryPrioritySoc(value) {
+            setBatterySocControlsDisabled(true);
+            pendingBatteryPrioritySoc = value;
+            pendingBatterySocTimestamp = Date.now();
+            try {
+                const response = await apiFetch('/api/battery_priority_soc', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ soc: value })
+                });
+                if (!response.ok) throw new Error('Failed to update battery minimum SOC');
+                showSuccess(`Battery minimum set to ${value}%`);
+                await fetchStatus();
+            } catch (error) {
+                console.error('Error updating battery minimum SOC:', error);
+                showError('Failed to update battery minimum SOC');
+                pendingBatteryPrioritySoc = null;
+                await fetchStatus();
+            } finally {
+                setBatterySocControlsDisabled(false);
+            }
         }
         
         async function setManualCurrent(current) {
@@ -1019,15 +1040,21 @@ def api_set_manual_current():
     return jsonify({'success': True})
 
 
-@app.route('/api/battery_priority', methods=['POST'])
-def api_set_battery_priority():
-    """Toggle manual battery priority."""
+@app.route('/api/battery_priority_soc', methods=['POST'])
+def api_set_battery_priority_soc():
+    """Update the auto-mode battery minimum SOC threshold."""
     data = request.get_json()
-    enabled = bool(data.get('enabled'))
+    soc = data.get('soc')
+    try:
+        soc_value = max(0, min(100, int(soc)))
+    except (TypeError, ValueError):
+        return jsonify({'success': False, 'error': 'invalid_soc'}), 400
+
     command_file = Path('/data/command.json')
     with open(command_file, 'w') as f:
-        json.dump({'command': 'set_battery_priority', 'enabled': enabled}, f)
-    return jsonify({'success': True, 'enabled': enabled})
+        json.dump({'command': 'set_battery_priority_soc', 'soc': soc_value}, f)
+
+    return jsonify({'success': True, 'soc': soc_value})
 
 
 @app.route('/api/start', methods=['POST'])

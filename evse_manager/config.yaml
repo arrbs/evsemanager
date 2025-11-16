@@ -1,5 +1,5 @@
 name: EVSE Manager
-version: "0.1.21"
+version: "0.1.22"
 slug: evse_manager
 description: Intelligent EVSE power management with solar optimization
 url: "https://github.com/arrbs/evsemanager"
@@ -38,6 +38,7 @@ options:
   # Optional sensors
   voltage_sensor: "sensor.ss_inverter_voltage"
   inverter_power: "sensor.ss_inverter_power"
+  battery_priority_soc: 80
   
   # Control settings
   mode: "manual"
@@ -49,7 +50,6 @@ options:
   start_retry_delay: 3
   start_retry_cooldown: 300
   start_handshake_window: 20
-  battery_priority_override: false
   
   log_level: "info"
 
@@ -64,6 +64,7 @@ schema:
   battery_power_charging_positive: bool?
   voltage_sensor: str?
   inverter_power: str?
+  battery_priority_soc: int(0,100)
   mode: list(auto|manual)
   update_interval: int(1,60)
   grace_period: int(60,3600)
@@ -73,5 +74,4 @@ schema:
   start_retry_delay: int(1,10)
   start_retry_cooldown: int(30,1800)
   start_handshake_window: int(5,120)
-  battery_priority_override: bool?
   log_level: list(debug|info|warning|error)

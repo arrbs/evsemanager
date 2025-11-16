@@ -423,6 +423,12 @@ class PowerManager:
             return True
         
         return False
+
+    def set_battery_priority_soc(self, value: int):
+        """Update the battery priority SOC threshold when battery method is active."""
+        if self.method == 'battery' and hasattr(self.calculator, 'priority_soc'):
+            self.calculator.priority_soc = value
+            self.logger.info(f"Battery priority SOC updated to {value}%")
     
     def should_stop_charging(self, charger_controller) -> bool:
         """

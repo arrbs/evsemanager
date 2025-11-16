@@ -70,7 +70,6 @@ class EVSEManager:
         self.start_retry_delay = control_settings.get('start_retry_delay', 3)
         self.start_retry_cooldown = control_settings.get('start_retry_cooldown', 300)
         self.start_handshake_window = control_settings.get('start_handshake_window', 20)
-        self.battery_priority_override = control_settings.get('battery_priority_override', False)
         
         # Apply learned settings if available
         if self.adaptive_tuner and self.adaptive_tuner.should_apply_settings():
@@ -132,7 +131,7 @@ class EVSEManager:
                     'battery_soc_entity': config.get('battery_soc'),
                     'battery_power_entity': config.get('battery_power'),
                     'battery_high_soc': 95,
-                    'battery_priority_soc': 80,
+                    'battery_priority_soc': config.get('battery_priority_soc', 80),
                     'battery_target_discharge_min': 0,
                     'battery_target_discharge_max': 1500,
                     'inverter_power_entity': config.get('inverter_power'),
@@ -150,8 +149,7 @@ class EVSEManager:
                     'start_retry_attempts': config.get('start_retry_attempts', 2),
                     'start_retry_delay': config.get('start_retry_delay', 3),
                     'start_retry_cooldown': config.get('start_retry_cooldown', 300),
-                    'start_handshake_window': config.get('start_handshake_window', 20),
-                    'battery_priority_override': config.get('battery_priority_override', False)
+                    'start_handshake_window': config.get('start_handshake_window', 20)
                 },
                 'adaptive': {
                     'enabled': False
@@ -181,8 +179,6 @@ class EVSEManager:
         Returns:
             True if battery needs priority (don't charge car)
         """
-        if self.battery_priority_override:
-            return True
         if self.mode == 'manual':
             return False
         if self.config.get('power_method') != 'battery':
@@ -623,7 +619,6 @@ class EVSEManager:
                         'power': power,
                         'direction': direction,
                         'priority_active': battery_priority_active,
-                        'manual_override': self.battery_priority_override,
                         'priority_threshold': battery_priority_soc_threshold
                     }
             except Exception as exc:  # noqa: BLE001
@@ -634,10 +629,7 @@ class EVSEManager:
 
         limiting_factors = []
         if battery_priority_active:
-            if self.battery_priority_override:
-                limiting_factors.append('battery_priority_override')
-            else:
-                limiting_factors.append('battery_priority')
+            limiting_factors.append('battery_priority')
         if inverter_limiting:
             limiting_factors.append('inverter_limit')
         if grace_status and grace_status.get('active'):
@@ -658,7 +650,7 @@ class EVSEManager:
         auto_pause_reason = None
         if not self.session_active:
             if battery_priority_active:
-                auto_pause_reason = 'battery_priority_override' if self.battery_priority_override else 'battery_priority'
+                auto_pause_reason = 'battery_priority'
             elif insufficient_power:
                 auto_pause_reason = 'insufficient_power'
             elif inverter_limiting:
@@ -695,11 +687,6 @@ class EVSEManager:
                         'waiting_for_battery',
                         'Holding for battery',
                         f'Battery SOC is {battery_info["soc"]:.1f}% (need {battery_priority_soc_threshold}%) — waiting for house battery to recover before starting EV charging.' if battery_info else 'Battery priority is delaying EV charging until the house battery recovers.'
-                    ),
-                    'battery_priority_override': (
-                        'manual_priority',
-                        'Battery priority (manual)',
-                        'You enabled manual battery priority, so auto mode is paused.'
                     ),
                     'inverter_limit': (
                         'inverter_limit',
@@ -760,6 +747,7 @@ class EVSEManager:
             'inverter_power': inverter_power,
             'inverter_limiting': inverter_limiting,
             'battery': battery_info,
+            'battery_priority_soc': battery_priority_soc_threshold,
             'limiting_factors': limiting_factors,
             'auto_pause_reason': auto_pause_reason,
             'auto_state': auto_state,
@@ -767,7 +755,6 @@ class EVSEManager:
             'auto_state_help': auto_state_help,
             'charger_transition': charger_transition,
             'grace_period': grace_status,
-            'battery_priority_override': self.battery_priority_override,
             'session_info': self.session_manager.get_current_session_info(),
             'stats': self.session_manager.get_stats(),
             'recent_sessions': self.session_manager.get_recent_sessions(10),
@@ -841,16 +828,19 @@ class EVSEManager:
                     self.logger.info("UI command: Stop charging")
                     if self.session_active:
                         self.stop_charging("user_request")
-                elif cmd_type == 'set_battery_priority':
-                    enabled = bool(command.get('enabled'))
-                    self.logger.info("UI command: Battery priority %s", "enabled" if enabled else "disabled")
-                    previous = self.battery_priority_override
-                    self.battery_priority_override = enabled
-                    if enabled and not previous:
-                        if self.session_active:
-                            self.stop_charging("battery_priority_manual")
-                    elif not enabled:
-                        self.failed_start_reason = None
+                elif cmd_type == 'set_battery_priority_soc':
+                    soc_value = command.get('soc')
+                    try:
+                        soc_value = max(0, min(100, int(soc_value)))
+                    except (TypeError, ValueError):
+                        soc_value = None
+
+                    if soc_value is not None:
+                        self.logger.info("UI command: Set battery minimum SOC to %s%%", soc_value)
+                        sensors = self.config.setdefault('sensors', {})
+                        sensors['battery_priority_soc'] = soc_value
+                        if hasattr(self.power_manager, 'set_battery_priority_soc'):
+                            self.power_manager.set_battery_priority_soc(soc_value)
                 
                 # Remove command file after processing
                 os.remove(command_file)
