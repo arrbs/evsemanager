@@ -179,7 +179,7 @@ HTML_TEMPLATE = """
         }
         #energy-state-chart {
             width: 100%;
-            height: 260px;
+            height: 220px;
             position: relative;
             z-index: 2;
         }
@@ -217,8 +217,9 @@ HTML_TEMPLATE = """
         }
         .energy-metrics {
             flex: 2;
+            min-width: 320px;
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
             gap: 16px;
         }
         .energy-metric {
@@ -235,8 +236,8 @@ HTML_TEMPLATE = """
         .energy-steps {
             flex: 1;
             min-width: 220px;
-            display: flex;
-            flex-direction: column;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
             gap: 10px;
         }
         .step-pill {
@@ -263,7 +264,9 @@ HTML_TEMPLATE = """
             display: flex;
             gap: 10px;
             flex-wrap: wrap;
-            margin-top: 10px;
+            margin-top: 16px;
+            position: relative;
+            z-index: 2;
         }
         .energy-badge {
             padding: 6px 14px;
@@ -273,6 +276,11 @@ HTML_TEMPLATE = """
             font-size: 12px;
             font-weight: 600;
             color: rgba(255, 255, 255, 0.85);
+        }
+        .energy-badge.alert {
+            background: rgba(239, 83, 80, 0.2);
+            border-color: rgba(239, 83, 80, 0.5);
+            color: #fecaca;
         }
         @media (max-width: 768px) {
             .energy-bottom { flex-direction: column; }
@@ -668,19 +676,9 @@ HTML_TEMPLATE = """
                         <div class="metric-subtext">Nearest safe step</div>
                     </div>
                     <div class="energy-metric">
-                        <div class="metric-label">PV Array</div>
-                        <div class="hero-value"><span id="pv-power">-</span><span class="metric-unit">W</span></div>
-                        <div class="metric-subtext">Instantaneous production</div>
-                    </div>
-                    <div class="energy-metric">
-                        <div class="metric-label">House Load</div>
-                        <div class="hero-value"><span id="house-load-power">-</span><span class="metric-unit">W</span></div>
-                        <div class="metric-subtext">Whole-home demand</div>
-                    </div>
-                    <div class="energy-metric">
-                        <div class="metric-label">Grid Delta</div>
-                        <div class="hero-value"><span id="grid-power-value">-</span><span class="metric-unit">W</span></div>
-                        <div class="metric-subtext">Export (-) / Import (+)</div>
+                        <div class="metric-label">Inverter Output</div>
+                        <div class="hero-value"><span id="inverter-output-power">-</span><span class="metric-unit">W</span></div>
+                        <div class="metric-subtext">Live inverter sensor</div>
                     </div>
                 </div>
                 <div class="energy-steps" id="evse-step-grid">
@@ -688,8 +686,11 @@ HTML_TEMPLATE = """
                 </div>
             </div>
             <div class="energy-badges">
-                <span class="energy-badge" id="battery-guard-pill">Battery guard --%</span>
+                <span class="energy-badge" id="pv-pill">PV -- W</span>
+                <span class="energy-badge" id="load-pill">Load -- W</span>
                 <span class="energy-badge" id="grid-balance-pill">Grid balance --</span>
+                <span class="energy-badge" id="battery-guard-pill">Battery guard --%</span>
+                <span class="energy-badge alert" id="inverter-limit-pill" style="display:none;">Inverter limit</span>
             </div>
         </div>
 
@@ -731,35 +732,6 @@ HTML_TEMPLATE = """
                         </div>
                     </div>
                 </div>
-            </div>
-
-            <div class="card" id="energy-card">
-                <h2>Solar & Inverter</h2>
-                <div class="metric-grid three">
-                    <div>
-                        <div class="metric-label">Available Solar</div>
-                        <div class="hero-value">
-                            <span id="available-power">-</span>
-                            <span class="metric-unit">W</span>
-                        </div>
-                    </div>
-                    <div>
-                        <div class="metric-label">Target Current</div>
-                        <div class="hero-value">
-                            <span id="target-current">-</span>
-                            <span class="metric-unit">A</span>
-                        </div>
-                        <div class="metric-subtext">Commanded amps</div>
-                    </div>
-                    <div>
-                        <div class="metric-label">Inverter Output</div>
-                        <div class="hero-value">
-                            <span id="inverter-power">-</span>
-                            <span class="metric-unit">W</span>
-                        </div>
-                    </div>
-                </div>
-                <div class="alert-banner" id="inverter-limit-banner">⚠️ Inverter limit reached</div>
             </div>
 
             <div class="card limits-card">
@@ -1052,30 +1024,41 @@ HTML_TEMPLATE = """
             if (gridChip) {
                 gridChip.textContent = formatSignedWatts(data.grid_power);
             }
+            const pvPill = document.getElementById('pv-pill');
+            if (pvPill) {
+                pvPill.textContent = `PV ${formatWattsValue(data.total_pv_power)} W`;
+            }
+            const loadPill = document.getElementById('load-pill');
+            if (loadPill) {
+                loadPill.textContent = `Load ${formatWattsValue(data.house_load_power)} W`;
+            }
+            const gridBalance = document.getElementById('grid-balance-pill');
+            if (gridBalance) {
+                if (typeof data.grid_power === 'number') {
+                    const direction = data.grid_power >= 0 ? 'Import' : 'Export';
+                    const watts = formatWattsValue(Math.abs(data.grid_power));
+                    gridBalance.textContent = `${direction} ${watts} W`;
+                } else {
+                    gridBalance.textContent = 'Grid balance --';
+                }
+            }
             const guardPill = document.getElementById('battery-guard-pill');
             if (guardPill) {
                 const guardValue = energyMap.battery_guard_soc ?? data.battery_priority_soc;
                 guardPill.textContent = typeof guardValue === 'number' ? `Battery guard ${guardValue}%` : 'Battery guard --%';
             }
-            const gridBalance = document.getElementById('grid-balance-pill');
-            if (gridBalance) {
-                if (typeof data.grid_power === 'number') {
-                    gridBalance.textContent = data.grid_power >= 0 ? `Importing ${formatWattsValue(data.grid_power)} W` : `Exporting ${formatWattsValue(Math.abs(data.grid_power))} W`;
+            const inverterPill = document.getElementById('inverter-limit-pill');
+            if (inverterPill) {
+                inverterPill.style.display = data.inverter_limiting ? 'inline-flex' : 'none';
+                if (data.inverter_limiting && typeof data.inverter_power === 'number') {
+                    inverterPill.textContent = `Inverter limit (${formatWattsValue(data.inverter_power)} W)`;
                 } else {
-                    gridBalance.textContent = 'Grid balance --';
+                    inverterPill.textContent = 'Inverter limit';
                 }
             }
-            const pvMetric = document.getElementById('pv-power');
-            if (pvMetric) {
-                pvMetric.textContent = formatWattsValue(data.total_pv_power);
-            }
-            const loadMetric = document.getElementById('house-load-power');
-            if (loadMetric) {
-                loadMetric.textContent = formatWattsValue(data.house_load_power);
-            }
-            const gridMetric = document.getElementById('grid-power-value');
-            if (gridMetric) {
-                gridMetric.textContent = formatSignedWatts(data.grid_power);
+            const inverterMetric = document.getElementById('inverter-output-power');
+            if (inverterMetric) {
+                inverterMetric.textContent = formatWattsValue(data.inverter_power);
             }
             const availableMetric = document.getElementById('energy-available-watts');
             if (availableMetric) {
@@ -1285,19 +1268,11 @@ HTML_TEMPLATE = """
             }
             
             // Solar power
-            document.getElementById('available-power').textContent = data.available_power?.toFixed(0) || '-';
             const targetCurrentValue = data.target_current?.toFixed(1) || '-';
-            const targetPrimary = document.getElementById('target-current');
-            if (targetPrimary) {
-                targetPrimary.textContent = targetCurrentValue;
-            }
             const targetHeroDisplay = document.getElementById('target-current-hero');
             if (targetHeroDisplay) {
                 targetHeroDisplay.textContent = targetCurrentValue;
             }
-            document.getElementById('inverter-power').textContent = data.inverter_power?.toFixed(0) || '-';
-            const inverterBanner = document.getElementById('inverter-limit-banner');
-            inverterBanner.style.display = data.inverter_limiting ? 'flex' : 'none';
             const batteryCard = document.getElementById('battery-card');
             const batteryData = data.battery;
             if (batteryData) {
