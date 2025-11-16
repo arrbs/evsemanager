@@ -1,7 +1,7 @@
 name: EVSE Manager
-version: "0.1.60"
+version: "1.0.0"
 slug: evse_manager
-description: Intelligent EVSE power management with solar optimization
+description: Deterministic EVSE control loop with neon web dashboard
 url: "https://github.com/arrbs/evsemanager"
 arch:
   - armhf
@@ -22,63 +22,49 @@ hassio_role: homeassistant
 auth_api: true
 
 options:
-  # Charger settings
+  # Entity wiring
   charger_switch: "switch.ev_charger"
   charger_current: "number.ev_charger_set_current"
   charger_status: "sensor.ev_charger_status"
-  charger_allowed_currents: "6,8,10,13,16,20,24"
-  charger_step_delay: 10
-  
-  # Battery sensors (for solar calculation)
   battery_soc: "sensor.ss_battery_soc"
   battery_power: "sensor.ss_battery_power"
-  # Set to true if your inverter reports positive watts while charging the battery
-  battery_power_charging_positive: false
-  
-  # Power flow sensors (required for accurate solar calculation)
-  total_pv_power: "sensor.total_pv_power"
-  total_load_power: "sensor.ss_load_power"
-  
-  # Optional sensors
-  voltage_sensor: "sensor.ss_inverter_voltage"
   inverter_power: "sensor.ss_inverter_power"
-  battery_priority_soc: 80
-  
-  # Control settings
-  mode: "manual"
-  update_interval: 5
-  grace_period: 600
-  hysteresis_watts: 500
-  power_smoothing_window_seconds: 30
-  # Shorter smoothing keeps solar availability responsive
-  start_retry_attempts: 2
-  start_retry_delay: 3
-  start_retry_cooldown: 300
-  start_handshake_window: 20
-  
+  pv_power: "sensor.total_pv_power"
+  auto_enabled_entity: "input_boolean.evse_auto_enabled"
+
+  # Controller behaviour
+  auto_enabled_default: true
+  tick_seconds: 1.5
+  line_voltage_v: 230
+  soc_main_max: 95
+  small_discharge_margin_w: 200
+  probe_max_discharge_w: 1000
+  inverter_limit_w: 8000
+  inverter_margin_w: 500
+  cooldown_s: 5
+  waiting_timeout_s: 60
+
   log_level: "info"
 
 schema:
   charger_switch: str
   charger_current: str
   charger_status: str
-  charger_allowed_currents: str
-  charger_step_delay: int(5,60)
-  battery_soc: str
-  battery_power: str
-  battery_power_charging_positive: bool?
-  total_pv_power: str
-  total_load_power: str
-  voltage_sensor: str?
+  battery_soc: str?
+  battery_power: str?
   inverter_power: str?
-  battery_priority_soc: int(0,100)
-  mode: list(auto|manual)
-  update_interval: int(1,60)
-  grace_period: int(60,3600)
-  hysteresis_watts: int(100,5000)
-  power_smoothing_window_seconds: int(30,600)
-  start_retry_attempts: int(1,5)
-  start_retry_delay: int(1,10)
-  start_retry_cooldown: int(30,1800)
-  start_handshake_window: int(5,120)
-  log_level: list(debug|info|warning|error)
+  pv_power: str?
+  auto_enabled_entity: str?
+
+  auto_enabled_default: bool?
+  tick_seconds: float(1,2)?
+  line_voltage_v: float(200,260)?
+  soc_main_max: float(80,100)?
+  small_discharge_margin_w: float(50,500)?
+  probe_max_discharge_w: float(200,2000)?
+  inverter_limit_w: int(2000,15000)?
+  inverter_margin_w: int(100,2000)?
+  cooldown_s: float(1,15)?
+  waiting_timeout_s: float(10,600)?
+
+  log_level: list(debug|info|warning|error)?

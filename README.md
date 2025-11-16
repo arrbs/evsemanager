@@ -1,50 +1,67 @@
-# Home Assistant EVSE Manager Add-on
+# EVSE Manager — Deterministic Controller + Web UI
 
-An intelligent Home Assistant add-on that dynamically manages your Electric Vehicle Supply Equipment (EVSE) power levels based on available solar power production with advanced control algorithms and real-time monitoring.
+This add-on now ships a lean, deterministic EVSE controller plus the existing monitoring UI:
 
-## Overview
+- `evse_manager/app/controller_service.py` owns the main loop, invoking the FSM every second.
+- `state_machine.py`, `controller_config.py`, and `ha_adapter.py` implement the rule set from `EVSE_CONTROLLER_GUIDE.md`.
+- `web_ui.py` continues to render the live dashboard, reading `ui_state.json` that the controller persists each tick.
 
-This add-on provides sophisticated solar-aware EV charging with multiple power calculation methods, intelligent step control to prevent faults, session tracking, and a built-in web interface. It automatically adjusts your EV charger's power output to maximize the use of excess solar energy while respecting your charger's limitations and preventing grid import.
+The focus is on a single-owner, deterministic controller that modulates current purely from Home Assistant sensor data—no adaptive learning or historical heuristics. If you need the legacy auto/manual manager, refer to repository history.
 
-## Features
+## Deterministic FSM Controller Guide
 
-### Core Functionality
-- 🌞 **Three Power Calculation Methods**:
-  - **Direct**: Use a pre-calculated excess power sensor
-  - **Grid Export**: Calculate from grid import/export
-  - **Battery**: Intelligent battery state monitoring with priority control
-  
-- ⚡ **Smart Charger Control**:
-  - Configurable stepped current control (prevents faults)
-  - Automatic delay between adjustments
-  - Fault detection and recovery
-  - Support for chargers with discrete amp steps
-  
-- 🎯 **Dual Operating Modes**:
-  - **Auto Mode**: Automatically adjusts power based on solar availability
-  - **Manual Mode**: Fixed current setting with safe step transitions
-  
-- 🔋 **Battery Priority Management**:
-  - Configurable battery SoC threshold
-  - Prioritizes home battery over EV charging
-  - Maintains target discharge range when battery is full
-  
-- 📊 **Session Tracking & Analytics**:
-  - Tracks energy consumed per session
-  - Calculates solar vs. grid percentage
-  - Historical session data storage
-  - Learning and optimization over time
-  
-- 🌐 **Built-in Web Interface**:
-  - Real-time monitoring dashboard
-  - Control mode and current settings
-  - View current session and statistics
-  - Session history
-  
-- 🏠 **Home Assistant Integration**:
-  - Publishes entities for all key metrics
-  - Seamless integration with automations
-  - Dashboard widgets and controls
+- `EVSE_CONTROLLER_GUIDE.md` remains the authoritative specification for the control rules and invariants.
+- The new controller implementation follows this guide: monotonic cooldown handling, inverter protection, probe/main regions, and explicit rule ordering.
+- When extending the controller, update the guide first to keep design and implementation in lockstep.
+
+> **Note**: Sections below the next heading are preserved from the original project. Many advanced features (learning mode, sessions, etc.) are not part of the deterministic controller and should be treated as historical documentation.
+
+## Current Components
+
+- Deterministic FSM controller (see `controller_service.py`).
+- Flask/Gunicorn Web UI for ingress.
+- Configuration loader that maps `options.json` into controller + entity wiring.
+- Home Assistant REST adapter for switch/current commands.
+
+Any additional logic—power calculators, simulators, adaptive learning—has been removed intentionally.
+
+## Deterministic Controller Quickstart
+
+Set the required entity IDs and controller constants inside your add-on configuration (`/data/options.json`). All keys live at the top level unless noted:
+
+```yaml
+entities:
+  charger_switch: switch.ev_charger
+  charger_current: number.ev_charger_set_current
+  charger_status: sensor.ev_charger_status
+  battery_soc: sensor.battery_soc
+  battery_power: sensor.battery_power        # Negative = charging
+  inverter_power: sensor.inverter_power
+  pv_power: sensor.total_pv_power
+  auto_enabled: input_boolean.evse_auto      # Optional; omit to always allow auto
+
+tick_seconds: 1.5          # Clamped between 1–2s
+line_voltage_v: 230        # Used to convert amps → watts for UI
+soc_main_max: 95           # Above this, controller switches to PROBE region
+inverter_limit_w: 8000     # Hard cap reported by inverter
+inverter_margin_w: 500     # Safety cushion below inverter limit
+probe_max_discharge_w: 1000
+small_discharge_margin_w: 200
+
+log_level: INFO            # DEBUG for verbose FSM traces
+auto_enabled_default: true # Fallback when auto entity missing/unavailable
+```
+
+When the add-on starts, `controller_service.py` loads this configuration, polls the listed entities once per tick, runs the FSM, and writes the latest UI payload to `/data/ui_state.json`. The web UI renders the same data via Gunicorn on port 5000/ingress. Adjusting entity IDs in the config requires an add-on restart.
+
+### Manual Verification Checklist
+
+1. **Sensor sanity** – In Home Assistant Developer Tools, confirm every entity listed above reports valid values (particularly units/sign conventions for power sensors).
+2. **Dry run** – Start the add-on while the EVSE is idle. Watch the add-on logs for `Deterministic FSM online` and ensure the UI shows `idle`.
+3. **Plug in vehicle** – With auto-enabled, plug in the EV. The FSM should transition from `idle` to `charging` once PV excess or battery discharge rules allow the first 6 A step.
+4. **Step changes** – Observe log lines like `FSM MAIN_READY→MAIN_COOLDOWN | 6A→8A` as solar power increases/decreases; verify the HA number entity mirrors the commanded amps.
+5. **Inverter guard** – Temporarily limit inverter capacity (or simulate via Developer Tools) so total load exceeds `inverter_limit_w`. The FSM should step down and, if necessary, disable the switch entirely.
+6. **Probe region** – Raise battery SoC above `soc_main_max` and verify the controller switches to probe mode (look for `PROBE_READY` in logs) and uses battery discharge thresholds instead of PV excess.
 
 ## Installation
 
@@ -179,16 +196,25 @@ control:
 log_level: "info"
 ```
 
-## Prerequisites
+## How to run the Web UI
 
-Before using this add-on, ensure you have:
+Run the local Flask server to serve the UI for monitoring. This serves a self-contained dashboard and reads `ui_state.json` if present.
 
-1. **Solar Power Sensor**: A sensor entity that reports current solar power production in Watts
-   - Example: Integration with your solar inverter (SolarEdge, Fronius, Enphase, etc.)
+Install Flask:
 
-2. **EVSE Integration**: Your EV charger must be integrated with Home Assistant
-   - Popular integrations: Wallbox, Easee, OpenEVSE, etc.
-   - The charger entity should support power level control
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install flask
+```
+
+Run the UI:
+
+```bash
+python3 evse_manager/app/web_ui.py
+```
+
+Open http://localhost:5000 in your browser to view the dashboard.
 
 ## How It Works
 
@@ -416,7 +442,7 @@ adaptive:
 
 ### Custom Power Algorithms
 
-You can modify the power calculation logic in `app/power_calculator.py`:
+The power calculation control code has been removed. Instead, you can view the Web UI in `evse_manager/app/web_ui.py`.
 - Adjust smoothing algorithms
 - Change hysteresis behavior
 - Add custom conditions
@@ -452,17 +478,12 @@ automation:
 
 ## Development
 
-### Project Structure
+### Project Structure (UI-only)
 
 ```
 homeassistant-evse-manager/
 ├── app/
-│   ├── main.py                 # Main control loop and manager
-│   ├── charger_controller.py   # EVSE control with safe step logic
-│   ├── power_calculator.py     # Power calculation methods A/B/C
-│   ├── session_manager.py      # Session tracking and statistics
-│   ├── ha_api.py               # Home Assistant API client
-│   └── web_ui.py              # Flask web interface
+│   └── web_ui.py              # Flask web interface (UI-only)
 ├── .github/
 │   └── copilot-instructions.md
 ├── build.yaml                  # Multi-arch build configuration
@@ -516,15 +537,8 @@ cat > data/options.json << EOF
 }
 EOF
 
-# Set Home Assistant connection (for testing)
-export HA_URL="http://homeassistant.local:8123"
-export HA_TOKEN="your-long-lived-access-token"
-
-# Run the application
+# Run the UI locally
 cd app
-python3 main.py
-
-# Or run web UI separately
 python3 web_ui.py
 ```
 

@@ -23,6 +23,5 @@ python3 -m gunicorn -w 1 -b 0.0.0.0:5000 web_ui:app --access-logfile - --error-l
 # Small delay to let web server start
 sleep 2
 
-# Run the main application
-bashio::log.info "Starting EVSE Manager daemon..."
-cd /app && python3 main.py
+bashio::log.info "Starting deterministic controller loop..."
+python3 controller_service.py

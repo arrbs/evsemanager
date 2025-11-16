@@ -17,20 +17,11 @@ This is a Home Assistant add-on that manages EVSE (Electric Vehicle Supply Equip
 
 ## Project Architecture
 
-### Core Modules
-- **main.py**: Main control loop, auto/manual modes, session management
-- **charger_controller.py**: Safe EVSE control with step delays and fault detection
-- **power_calculator.py**: Three power calculation methods (Direct, Grid, Battery)
-- **session_manager.py**: Session tracking, statistics, and data persistence
-- **ha_api.py**: Home Assistant REST API client and entity publisher
+### Core Modules (UI-only)
 - **web_ui.py**: Flask-based web interface for monitoring and control
 
 ### Key Features Implemented
-1. Three power calculation methods with intelligent smoothing
-2. Safe stepped current control to prevent charger faults
-3. Battery priority management with configurable thresholds
-4. Grace periods and hysteresis for stable operation
-5. Session tracking with energy and solar percentage calculation
+The in-depth control logic and simulation modules were intentionally removed. This repository now focuses solely on the web UI.
 6. Ingress-enabled web UI for real-time monitoring
 7. Home Assistant entity integration for automation
 8. Fault detection and recovery mechanisms

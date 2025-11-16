@@ -55,18 +55,11 @@ adaptive:
 
 Based on your requirements, here's your configuration:
 
-```yaml
-charger:
-  name: "My EVSE"
   switch_entity: "switch.ev_charger"
   current_entity: "number.ev_charger_set_current"
-  status_entity: "sensor.ev_charger_status"
-  allowed_currents: [6, 8, 10, 13, 16, 20, 24]
-  step_delay: 10
   voltage_entity: "sensor.ss_inverter_voltage"
   default_voltage: 230
-
-power_method: "battery"
+This quickstart now only covers the included Web UI; the control logic has been removed.
 
 sensors:
   battery_soc_entity: "sensor.ss_battery_soc"
@@ -82,18 +75,15 @@ sensors:
   total_pv_entity: "sensor.total_pv_power"
   total_load_entity: "sensor.total_load_power"
 
-control:
-  mode: "auto"
-  manual_current: 6
-  update_interval: 5
   grace_period: 600
   min_session_duration: 600
   power_smoothing_window: 60
-  hysteresis_watts: 500
 
 log_level: "info"
-```
 
+# Run the Web UI
+cd app
+python3 web_ui.py
 ## Next Steps
 
 1. **Install in Home Assistant**
@@ -105,7 +95,7 @@ log_level: "info"
    - Verify all entity IDs exist in your Home Assistant
 
 3. **Test Carefully**
-   - Start with `log_level: "debug"`
+│   └── web_ui.py              # Web interface (UI-only)
    - Monitor logs during first few sessions
    - Watch for any fault conditions
    - Adjust `step_delay` if needed
@@ -116,45 +106,23 @@ log_level: "info"
 
 5. **Create Automations**
    - Use the exposed entities in your automations
-   - Build custom dashboards with the sensors
-
-## Files Created
 
 ```
 homeassistant-evse-manager/
-├── app/
-│   ├── main.py                 # Main manager (315 lines)
-│   ├── charger_controller.py   # EVSE control (267 lines)
-│   ├── power_calculator.py     # Power methods (331 lines)
 │   ├── session_manager.py      # Sessions (279 lines)
 │   ├── ha_api.py               # HA integration (288 lines)
-│   └── web_ui.py              # Web interface (415 lines)
-├── config.yaml                 # Configuration schema
-├── Dockerfile                  # Container build
 ├── run.sh                      # Startup script
 ├── build.yaml                  # Multi-arch builds
-├── README.md                   # Full documentation
-└── .github/
-    └── copilot-instructions.md # Project guidelines
 ```
 
 **Total**: ~1,895 lines of Python code + configuration
 
-## Key Features Explained
-
 ### Battery Method (Your Choice)
 - **Below 80% SoC**: Battery charges first, no EV charging
-- **80-95% SoC**: Uses battery charging rate as available power
-- **Above 95% SoC**: Increases EV load until battery discharges 0-1500W
-  - This reveals true solar excess even when battery is full
 
 ### Step Control Safety
-- Only moves one step at a time: 6A → 8A → 10A (not 6A → 16A)
-- Waits 10 seconds between adjustments
 - Monitors for faults after each change
 - Automatically stops if charger faults
-
-### Grace Period
 - Doesn't stop immediately when solar drops
 - Waits 10 minutes (configurable) before stopping
 - Handles clouds and transient loads gracefully
