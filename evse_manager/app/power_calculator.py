@@ -423,26 +423,61 @@ class PowerManager:
         Returns:
             Target current in amps, or None if no change needed
         """
-        # In aggressive discharge mode, force stepping up regardless of calculated power
+        # In aggressive discharge mode, maintain target discharge rate
         in_aggressive = self.is_aggressive_discharge_mode()
         if in_aggressive:
-            # Find next higher current step
-            allowed = charger_controller.allowed_currents
-            current_idx = None
-            for i, amp in enumerate(allowed):
-                if abs(amp - current_amps) < 0.5:  # Match current level
-                    current_idx = i
-                    break
+            battery_calc = self.calculator
+            battery_power = self.ha_api.get_state(battery_calc.battery_power_entity)
             
-            if current_idx is not None and current_idx < len(allowed) - 1:
-                # Step up to next level
-                next_amps = allowed[current_idx + 1]
-                self.logger.info(f"⚡ Aggressive mode: stepping up {current_amps}A → {next_amps}A to discharge battery")
-                return next_amps
-            else:
-                # Already at max or can't find current level
-                self.logger.debug(f"Aggressive mode: already at max current {current_amps}A")
-                return None
+            if battery_power is not None:
+                normalized = battery_calc._normalize_battery_power(float(battery_power))
+                target_min = battery_calc.target_discharge_min  # 0W default
+                target_max = battery_calc.target_discharge_max  # 1500W default
+                target_mid = (target_min + target_max) / 2  # 750W
+                
+                allowed = charger_controller.allowed_currents
+                current_idx = None
+                for i, amp in enumerate(allowed):
+                    if abs(amp - current_amps) < 0.5:
+                        current_idx = i
+                        break
+                
+                if current_idx is None:
+                    return None
+                
+                # Battery charging (negative) - step up
+                if normalized < 0:
+                    if current_idx < len(allowed) - 1:
+                        next_amps = allowed[current_idx + 1]
+                        self.logger.info(f"⚡ Aggressive: battery charging {abs(normalized):.0f}W, stepping up {current_amps}A → {next_amps}A")
+                        return next_amps
+                    else:
+                        self.logger.debug(f"⚡ Aggressive: already at max {current_amps}A")
+                        return None
+                
+                # Battery discharging - maintain in target range
+                elif normalized < target_min:
+                    # Not discharging enough - step up
+                    if current_idx < len(allowed) - 1:
+                        next_amps = allowed[current_idx + 1]
+                        self.logger.info(f"⚡ Aggressive: discharge {normalized:.0f}W below target {target_mid:.0f}W, stepping up {current_amps}A → {next_amps}A")
+                        return next_amps
+                    return None
+                
+                elif normalized > target_max:
+                    # Discharging too much - step down
+                    if current_idx > 0:
+                        prev_amps = allowed[current_idx - 1]
+                        self.logger.info(f"⚡ Aggressive: discharge {normalized:.0f}W above target {target_mid:.0f}W, stepping down {current_amps}A → {prev_amps}A")
+                        return prev_amps
+                    return None
+                
+                else:
+                    # In sweet spot - maintain
+                    self.logger.debug(f"⚡ Aggressive: discharge {normalized:.0f}W in target range, maintaining {current_amps}A")
+                    return None
+            
+            return None
         
         # Normal mode: calculate based on available power
         # Convert current amps to watts
@@ -521,9 +556,10 @@ class PowerManager:
             self.logger.info(f"Battery priority SOC updated to {value}%")
     
     def is_aggressive_discharge_mode(self) -> bool:
-        """Check if we're in aggressive mode: SOC≥95% and battery charging.
+        """Check if we're in aggressive mode: SOC≥95% and battery charging OR discharging moderately.
         
-        In this mode, ignore power calculations - battery will handle any deficit.
+        In this mode, allow battery to discharge to bring SOC back to 95%.
+        Target discharge: 0-1500W range.
         """
         if self.method != 'battery':
             return False
@@ -542,13 +578,25 @@ class PowerManager:
         battery_power = float(battery_power)
         normalized = battery_calc._normalize_battery_power(battery_power)
         
-        # SOC≥95% and battery is charging (negative normalized power)
-        in_aggressive = soc >= 95 and normalized < 0
+        # SOC≥95% and battery is charging OR discharging at acceptable rate
+        # normalized: positive = discharging, negative = charging
+        target_max = battery_calc.target_discharge_max  # 1500W default
         
-        if in_aggressive:
-            self.logger.info(f"⚡ AGGRESSIVE MODE: SOC {soc:.1f}%, battery charging {abs(normalized):.0f}W - bypassing all power limits")
+        if soc >= 95:
+            if normalized < 0:
+                # Battery charging - definitely want to discharge it
+                self.logger.info(f"⚡ AGGRESSIVE MODE: SOC {soc:.1f}%, battery charging {abs(normalized):.0f}W - will increase load")
+                return True
+            elif 0 <= normalized <= target_max:
+                # Battery discharging at acceptable rate - maintain this
+                self.logger.info(f"⚡ AGGRESSIVE MODE: SOC {soc:.1f}%, battery discharging {normalized:.0f}W - maintaining discharge")
+                return True
+            else:
+                # Discharging too fast - back off
+                self.logger.info(f"SOC {soc:.1f}%, battery discharging {normalized:.0f}W exceeds target {target_max}W - exiting aggressive mode")
+                return False
         
-        return in_aggressive
+        return False
     
     def should_stop_charging(self, charger_controller) -> bool:
         """
