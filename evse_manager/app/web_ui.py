@@ -218,7 +218,9 @@ HTML_TEMPLATE = """
             font-size: 12px;
             text-transform: uppercase;
             letter-spacing: 0.08em;
-            color: rgba(15, 23, 42, 0.75);
+            color: rgba(255, 255, 255, 0.92);
+            font-weight: 600;
+            text-shadow: 0 1px 0 rgba(0, 0, 0, 0.25);
             position: relative;
             z-index: 2;
         }
@@ -259,8 +261,8 @@ HTML_TEMPLATE = """
             color: white;
             font-size: 28px;
         }
-        .energy-metric .metric-label { color: rgba(255, 255, 255, 0.65); }
-        .energy-metric .metric-subtext { color: rgba(255, 255, 255, 0.55); }
+        .energy-metric .metric-label { color: rgba(255, 255, 255, 0.95); font-weight: 700; }
+        .energy-metric .metric-subtext { color: rgba(226, 232, 240, 0.8); }
         .energy-steps {
             flex: 1;
             min-width: 220px;
