@@ -149,6 +149,20 @@ HTML_TEMPLATE = """
             background: radial-gradient(circle at top right, rgba(79, 70, 229, 0.35), transparent 45%);
             pointer-events: none;
         }
+        .energy-chart-wrapper {
+            position: relative;
+            width: 100%;
+            height: 240px;
+            max-height: 260px;
+            margin-bottom: 10px;
+            z-index: 2;
+        }
+        .energy-chart-wrapper canvas {
+            position: absolute;
+            inset: 0;
+            width: 100% !important;
+            height: 100% !important;
+        }
         .energy-header {
             display: flex;
             align-items: flex-start;
@@ -176,12 +190,6 @@ HTML_TEMPLATE = """
         .energy-chip-outline {
             background: rgba(15, 23, 42, 0.4);
             border-color: rgba(255, 255, 255, 0.25);
-        }
-        #energy-state-chart {
-            width: 100%;
-            height: 220px;
-            position: relative;
-            z-index: 2;
         }
         .energy-legend {
             margin-top: 16px;
@@ -650,7 +658,9 @@ HTML_TEMPLATE = """
                     <span class="energy-chip energy-chip-outline">Grid <span id="grid-chip">-</span> W</span>
                 </div>
             </div>
-            <canvas id="energy-state-chart"></canvas>
+            <div class="energy-chart-wrapper">
+                <canvas id="energy-state-chart"></canvas>
+            </div>
             <div class="energy-legend">
                 <div><span class="legend-dot available"></span>Available</div>
                 <div><span class="legend-dot pv"></span>Total PV</div>
