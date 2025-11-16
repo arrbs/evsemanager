@@ -1,5 +1,5 @@
 name: EVSE Manager
-version: "0.1.34"
+version: "0.1.35"
 slug: evse_manager
 description: Intelligent EVSE power management with solar optimization
 url: "https://github.com/arrbs/evsemanager"

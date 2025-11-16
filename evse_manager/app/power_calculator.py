@@ -353,10 +353,17 @@ class PowerManager:
         Returns:
             Available power budget for EV (watts)
         """
-        # Get power from calculator
-        raw_power = self.calculator.update(current_ev_watts=current_ev_load, for_display=for_display)
+        # Get RAW power from calculator (no smoothing)
+        # Calculate directly, bypassing the smoothing in update()
+        raw_power = self.calculator.calculate_available_power(current_ev_watts=current_ev_load, for_display=for_display)
         
         if raw_power is not None:
+            # Still record history for display, but don't use smoothed value for control
+            now = time.time()
+            self.calculator.power_history.append((now, raw_power))
+            self.calculator._trim_history(now)
+            self.calculator.last_update = now
+            
             # Check for rapid changes indicating external load changes
             if self.last_available_power is not None:
                 delta = raw_power - self.last_available_power
@@ -367,9 +374,7 @@ class PowerManager:
             
             self.last_available_power = raw_power
             
-            # Both display and control use the same value:
-            # PV - (Load - Car) = excess available for car
-            # This is the total power budget the car can use
+            # Return raw, unsmoothed power for immediate response
             return raw_power
         else:
             return 0.0
