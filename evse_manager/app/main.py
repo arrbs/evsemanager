@@ -476,11 +476,13 @@ class EVSEManager:
             # If charger status is CHARGING, subtract the EV consumption from total load
             if charger_status == ChargerStatus.CHARGING and total_load_power is not None:
                 ev_consumption = self.charger.amps_to_watts(current_amps)
-                house_only_load = total_load_power - ev_consumption
-                self.logger.debug(f"House load: {total_load_power:.0f}W - {ev_consumption:.0f}W (EV) = {house_only_load:.0f}W")
+                house_only_load = max(0.0, total_load_power - ev_consumption)
+                self.logger.debug(
+                    f"House load: {total_load_power:.0f}W - {ev_consumption:.0f}W (EV) = {house_only_load:.0f}W"
+                )
             else:
                 house_only_load = total_load_power
-                if total_load_power:
+                if total_load_power is not None:
                     self.logger.debug(f"House load: {total_load_power:.0f}W (no EV consumption)")
             
             # Get target
@@ -749,7 +751,7 @@ class EVSEManager:
         # If charger status is CHARGING, subtract the EV consumption from total load
         if current_status == ChargerStatus.CHARGING and total_load_power is not None:
             ev_consumption = self.charger.amps_to_watts(current_amps)
-            house_only_load = total_load_power - ev_consumption
+            house_only_load = max(0.0, total_load_power - ev_consumption)
         else:
             house_only_load = total_load_power
         
@@ -908,7 +910,8 @@ class EVSEManager:
             'learning_status': self.adaptive_tuner.get_learning_status() if self.adaptive_tuner else None,
             'power_method': self.config.get('power_method', 'battery'),
             'total_pv_power': total_pv_power,
-            'house_load_power': total_load_power,
+            'house_load_power': house_only_load,
+            'total_load_power': total_load_power,
             'grid_power': grid_power,
             'energy_map': {
                 'history': list(self.energy_history),
