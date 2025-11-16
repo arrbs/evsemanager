@@ -473,9 +473,15 @@ class EVSEManager:
             grid_power = _read_sensor(grid_entity)
             
             # For display: show house-only load (subtract EV if charging)
-            house_only_load = total_load_power
-            if house_only_load is not None and current_ev_watts > 0:
-                house_only_load = total_load_power - current_ev_watts
+            # If charger status is CHARGING, subtract the EV consumption from total load
+            if charger_status == ChargerStatus.CHARGING and total_load_power is not None:
+                ev_consumption = self.charger.amps_to_watts(current_amps)
+                house_only_load = total_load_power - ev_consumption
+                self.logger.debug(f"House load: {total_load_power:.0f}W - {ev_consumption:.0f}W (EV) = {house_only_load:.0f}W")
+            else:
+                house_only_load = total_load_power
+                if total_load_power:
+                    self.logger.debug(f"House load: {total_load_power:.0f}W (no EV consumption)")
             
             # Get target
             target_current = self.power_manager.commanded_current or current_amps
@@ -740,9 +746,12 @@ class EVSEManager:
         grid_power = _read_sensor(grid_entity)
         
         # For display: show house-only load (subtract EV if charging)
-        house_only_load = total_load_power
-        if house_only_load is not None and current_ev_watts > 0:
-            house_only_load = total_load_power - current_ev_watts
+        # If charger status is CHARGING, subtract the EV consumption from total load
+        if current_status == ChargerStatus.CHARGING and total_load_power is not None:
+            ev_consumption = self.charger.amps_to_watts(current_amps)
+            house_only_load = total_load_power - ev_consumption
+        else:
+            house_only_load = total_load_power
         
         evse_steps = [
             {
