@@ -178,69 +178,10 @@ class ControlService:
             "auto_state": self._auto_state(current_index, inputs, derived),
             "auto_state_label": self._auto_state_label(current_index, inputs, derived),
             "auto_state_help": self._auto_state_help(current_index, inputs, derived),
-                "control_target_label": self._control_target_label(),
-                "control_reason_label": self._control_reason_label(inputs, derived, decision),
+            "control_target_label": self._control_target_label(),
+            "control_reason_label": self._control_reason_label(inputs, derived, decision),
             "energy_map": self._energy_map(current_watts, target_watts, available_power),
         }
-            cfg = self.runtime_config.controller
-            lower = cfg.soc_target - cfg.soc_hysteresis
-            upper = cfg.soc_target + cfg.soc_hysteresis
-            return f"SOC target {cfg.soc_target:.1f}% (band {lower:.1f}–{upper:.1f}%)"
-                decision_reason = self._friendly_decision_reason(decision)
-                if decision_reason:
-                    return decision_reason
-                if derived.region == "PROBE":
-                    return self._probe_reason(inputs)
-                return self._main_reason(derived)
-                if not decision:
-                    return None
-                mapping = {
-                    "probe_soc_low_step_up": "SOC below band – nudging amps up.",
-                    "probe_soc_high_step_down": "SOC above band – releasing amps.",
-                    "probe_charge_margin_step_up": "Battery absorbing surplus – stepping up.",
-                    "probe_discharge_margin_step_down": "Battery discharging beyond margin – stepping down.",
-                    "probe_max_discharge": "Battery discharge cap hit – forcing step down.",
-                    "main_start": "PV surplus detected – starting charge.",
-                    "probe_start": "Battery charging – probing headroom.",
-                    "main_step_up": "PV excess available – stepping up.",
-                    "main_step_down": "PV deficit detected – stepping down.",
-                    "main_conservative_step_down": "Conservative guard unmet – easing draw.",
-                    "main_conservative_batt_discharge": "Battery discharging in conservative mode – reducing amps.",
-                    "inverter_drop": "Inverter limit reached – shutting off.",
-                    "inverter_step_down": "Inverter headroom tight – stepping down.",
-                }
-                if decision.reason in mapping:
-                    return mapping[decision.reason]
-                return decision.reason.replace("_", " ").capitalize()
-                cfg = self.runtime_config.controller
-                soc = inputs.batt_soc_percent
-                lower = cfg.soc_target - cfg.soc_hysteresis
-                upper = cfg.soc_target + cfg.soc_hysteresis
-                if soc is None:
-                    return "Holding SOC band – sensor unavailable."
-                if soc < lower:
-                    return f"SOC {soc:.1f}% below band (<{lower:.1f}%). Waiting to add amps."
-                if soc > upper:
-                    return f"SOC {soc:.1f}% above band (>{upper:.1f}%). Waiting to shed amps."
-                batt_power = inputs.batt_power_w
-                if batt_power is None:
-                    return "SOC within band – awaiting battery power telemetry."
-                if batt_power <= -cfg.probe_charge_margin_w:
-                    return (
-                        f"Battery charging {abs(batt_power):.0f}W; ready to add EV load if stable."
-                    )
-                if batt_power >= cfg.probe_discharge_margin_w:
-                    return (
-                        f"Battery discharging {batt_power:.0f}W beyond {cfg.probe_discharge_margin_w:.0f}W margin."
-                    )
-                return "SOC within band – holding step."
-                if derived.excess_w is None:
-                    return "Awaiting PV/inverter telemetry to quantify surplus."
-                if derived.excess_w > 0:
-                    return f"Surplus {derived.excess_w:.0f}W available for EV."
-                if derived.excess_w == 0:
-                    return "Balanced PV vs load – holding current step."
-                return f"Deficit {abs(derived.excess_w):.0f}W – monitoring before step down."
         try:
             UI_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
             with UI_STATE_PATH.open("w", encoding="utf-8") as handle:
