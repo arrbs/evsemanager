@@ -472,6 +472,11 @@ class EVSEManager:
             total_load_power = _read_sensor(load_entity)
             grid_power = _read_sensor(grid_entity)
             
+            # For display: show house-only load (subtract EV if charging)
+            house_only_load = total_load_power
+            if house_only_load is not None and current_ev_watts > 0:
+                house_only_load = total_load_power - current_ev_watts
+            
             # Get target
             target_current = self.power_manager.commanded_current or current_amps
             current_watts = self.charger.amps_to_watts(current_amps)
@@ -480,7 +485,7 @@ class EVSEManager:
             self._record_energy_trace(
                 available_power,
                 total_pv_power,
-                total_load_power,
+                house_only_load,  # Show house-only load on graph
                 grid_power,
                 current_watts,
                 target_watts
@@ -733,6 +738,12 @@ class EVSEManager:
         total_pv_power = _read_sensor(pv_entity)
         total_load_power = _read_sensor(load_entity)
         grid_power = _read_sensor(grid_entity)
+        
+        # For display: show house-only load (subtract EV if charging)
+        house_only_load = total_load_power
+        if house_only_load is not None and current_ev_watts > 0:
+            house_only_load = total_load_power - current_ev_watts
+        
         evse_steps = [
             {
                 'amps': amps,
@@ -746,7 +757,7 @@ class EVSEManager:
         self._record_energy_trace(
             available_power,
             total_pv_power,
-            total_load_power,
+            house_only_load,  # Show house-only load on graph
             grid_power,
             current_watts,
             target_watts
